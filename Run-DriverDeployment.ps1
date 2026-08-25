@@ -85,7 +85,7 @@ $ScriptName =
 # ------------------------------------------------------------
 
 $ScriptVersion =
-    '1.1.1'
+    '1.1.2'
 
 $ScriptUpdated =
     '2026-08-25'
@@ -131,6 +131,26 @@ $ErrorActionPreference =
 
 $WriteLogFiles =
     $false
+
+
+# Save the complete captured console stream from the controller
+# and all child scripts.
+#
+# Testing:
+#     $true
+#
+# Production:
+#     $false
+#
+# File:
+#     C:\ProgramData\Itino\DriverDeployment\ConsoleOutput.log
+#
+# The file survives exit 3010 and exit 1 while ITINO data is
+# preserved. On final clean exit 0 it is deleted together with
+# the complete C:\ProgramData\Itino folder.
+
+$SaveFullConsoleOutput =
+    $true
 
 
 # If deployment fails, preserve one combined error log:
@@ -486,6 +506,12 @@ $MainLogFile =
         'DriverDeployment-Main.log'
 
 
+$ConsoleOutputFile =
+    Join-Path `
+        $BasePath `
+        'ConsoleOutput.log'
+
+
 $RestartFile =
     Join-Path `
         $BasePath `
@@ -714,6 +740,34 @@ if (
 #
 # ============================================================
 
+if ($SaveFullConsoleOutput) {
+
+    try {
+
+        @(
+            '============================================================'
+            'ITINO DRIVER DEPLOYMENT CONSOLE OUTPUT'
+            '============================================================'
+            "Computer   : $env:COMPUTERNAME"
+            "Started    : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+            "Controller : $ScriptName v$ScriptVersion"
+            '============================================================'
+            ''
+        ) |
+            Set-Content `
+                -LiteralPath $ConsoleOutputFile `
+                -Encoding UTF8
+    }
+    catch {
+
+        Write-Host (
+            'WARNING: Unable to initialize ConsoleOutput.log. ' +
+            $_.Exception.Message
+        )
+    }
+}
+
+
 $DeploymentOutputBuffer =
     New-Object `
         'System.Collections.Generic.List[string]'
@@ -743,6 +797,22 @@ function Add-DeploymentBufferLine {
     [void]$DeploymentOutputBuffer.Add(
         [string]$Line
     )
+
+
+    if ($SaveFullConsoleOutput) {
+
+        try {
+
+            Add-Content `
+                -LiteralPath $ConsoleOutputFile `
+                -Value ([string]$Line) `
+                -Encoding UTF8
+        }
+        catch {
+
+            # Console logging must never stop driver deployment.
+        }
+    }
 }
 
 
@@ -2327,6 +2397,19 @@ try {
     Write-Log -Message (
         "Write log files: $WriteLogFiles"
     )
+
+
+    Write-Log -Message (
+        "Save full console output: $SaveFullConsoleOutput"
+    )
+
+
+    if ($SaveFullConsoleOutput) {
+
+        Write-Log -Message (
+            "Full captured console output file: $ConsoleOutputFile"
+        )
+    }
 
 
     Write-Log -Message (
