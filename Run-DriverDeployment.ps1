@@ -1,0 +1,3226 @@
+<#
+.SYNOPSIS
+    Runs the complete ITINO Driver Check And Update workflow.
+
+.DESCRIPTION
+    Runs the following scripts in order:
+
+        00-Preflight.ps1
+        01-Gather-Hardware.ps1
+        02-Install-OEM-Update-Tool.ps1
+        03-Update-Drivers.ps1
+        04-Verify-Drivers.ps1
+
+    The controller:
+        - Verifies all scripts exist
+        - Runs each script in a separate PowerShell process
+        - Streams child script console output live
+        - Captures child script output in memory
+        - Stops on real failures
+        - Continues when exit code 3010 is returned
+        - Optionally creates normal debug logs
+        - Preserves one error log only if deployment fails
+        - Removes temporary working files after final completion
+        - Does NOT remove working files when restart is required
+        - Returns 0, 1, or 3010 to the parent deployment sequence
+
+.EXIT CODES
+    0    Complete success, no restart required
+    1    Deployment failed
+    3010 Complete success, restart required
+
+.NOTES
+    This script does not restart Windows.
+
+    The surrounding PowerShell deployment sequence should:
+
+        1. Run this controller
+        2. Check the exit code
+        3. If 3010:
+            - save deployment state
+            - restart Windows
+            - resume deployment
+            - run this controller again
+
+    The parent deployment should limit complete driver deployment
+    cycles to prevent an endless reboot loop.
+#>
+
+[CmdletBinding()]
+param()
+
+
+# ============================================================
+# ITINO DRIVER DEPLOYMENT CONTROLLER
+# ============================================================
+
+$ScriptName =
+    'Run-DriverDeployment.ps1'
+
+
+# ============================================================
+# VERSION HISTORY
+# ============================================================
+
+# ------------------------------------------------------------
+# Title   : Driver Verification Console Reporting
+# Version : 1.0.0
+# Reason  : Fixes blank device names in the final verification
+#           output by falling back to FriendlyName, InstanceId,
+#           DeviceID and PNPDeviceID. Also aligns the controller
+#           summary with the current DriverVerification.json
+#           property names and reads NewErrors correctly.
+# Date    : 2026-08-21
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
+# Title   : Deployment Sequence Integration
+# Version : 1.1.0
+# Reason  : Adds restart-cycle state, original rollback-baseline
+#           preservation, maximum cycle protection, single-
+#           instance protection, firmware power-safety gating,
+#           failure artifact preservation and complete ITINO
+#           cleanup after final clean success.
+# Date    : 2026-08-25
+# ------------------------------------------------------------
+
+$ScriptVersion =
+    '1.1.0'
+
+$ScriptUpdated =
+    '2026-08-25'
+
+
+$ErrorActionPreference =
+    'Stop'
+
+
+# ============================================================
+# DEPLOYMENT OPTIONS
+# ============================================================
+#
+# TEST PC
+#
+# $WriteLogFiles             = $true
+# $KeepErrorLogOnFailure     = $true
+# $CleanupAfterDeployment    = $false
+# $UnattendedMode            = $true
+# $CloseLenovoHotkeyPopup    = $true
+# $RequireAdministrator      = $false
+#
+#
+# PRODUCTION / CUSTOMER PC
+#
+# $WriteLogFiles             = $false
+# $KeepErrorLogOnFailure     = $true
+# $CleanupAfterDeployment    = $true
+# $UnattendedMode            = $true
+# $CloseLenovoHotkeyPopup    = $true
+# $RequireAdministrator      = $true
+#
+# ============================================================
+
+
+# Create persistent normal log files.
+#
+# Production:
+#     $false
+#
+# Testing:
+#     $true
+
+$WriteLogFiles =
+    $false
+
+
+# If deployment fails, preserve one combined error log:
+#
+# C:\ProgramData\Itino\DriverDeployment-Error.log
+
+$KeepErrorLogOnFailure =
+    $true
+
+
+# Delete the complete temporary driver deployment working folder
+# after final success or failure.
+#
+# IMPORTANT:
+#
+# Cleanup is automatically skipped when the result is 3010,
+# because the driver workflow must run again after restart.
+
+$CleanupAfterDeployment =
+    $true
+
+
+
+# Also remove the persistent rollback folder after a FINAL
+# deployment result (exit 0 or exit 1).
+#
+# This deletes:
+#   C:\ProgramData\Itino\DriverRollback\
+#
+# It is intentionally skipped when the controller returns 3010,
+# because the deployment state must survive the restart.
+#
+# $false = keep rollback archives
+# $true  = delete the entire DriverRollback folder
+
+$DeleteDriverRollbackAfterDeployment =
+    $true
+
+
+# Run without requiring user interaction.
+
+$UnattendedMode =
+    $true
+
+
+# Automatically close Lenovo Hotkey Installer completion popup.
+
+$CloseLenovoHotkeyPopup =
+    $true
+
+
+# Require administrator rights for OEM tool installation
+# and driver installation.
+#
+# Production:
+#     $true
+#
+# Developer testing without elevation:
+#     $false
+
+$RequireAdministrator =
+    $true
+
+# ============================================================
+# PHASE 9 - DEPLOYMENT SEQUENCE SAFETY
+# ============================================================
+
+$PreserveInitialDriverBaselineAcrossRestarts =
+    $true
+
+$MaximumDeploymentCycles =
+    3
+
+$EnableSingleInstanceProtection =
+    $true
+
+# Keep ALL ITINO diagnostics/rollback data on a real failure.
+$PreserveArtifactsOnFailure =
+    $true
+
+# On final clean success (exit 0), remove:
+#   C:\ProgramData\Itino\
+#
+# Installed drivers and OEM utilities remain installed.
+$DeleteEntireItinoRootOnCleanSuccess =
+    $true
+
+# If a battery exists, BIOS/Firmware updates require at least
+# this charge level and the battery must not be discharging.
+$MinimumFirmwareBatteryPercent =
+    40
+
+# Guard checked between controller stages.
+$MaximumControllerRuntimeMinutes =
+    120
+
+
+# ============================================================
+# PREFLIGHT REQUIREMENTS
+# ============================================================
+
+$MinimumSystemDriveFreeGB =
+    10
+
+
+$WebTimeoutSeconds =
+    15
+
+
+# Minimum required PowerShell major version.
+#
+# Example:
+#
+# 5 = PowerShell 5 or newer is allowed.
+#
+# PowerShell 4 or older will fail preflight.
+
+$MinimumPowerShellMajorVersion =
+    5
+
+# ============================================================
+# OEM DOWNLOAD CONFIGURATION
+# ============================================================
+#
+# Keep all OEM discovery/download URLs and known-good fallback versions
+# here so they can be maintained in one place.
+#
+# Script 02 reads these values through environment variables.
+#
+# Dell and HP:
+#   The official page is used for dynamic latest-version discovery.
+#   The fallback package is used only when discovery cannot safely resolve
+#   a package that is at least as new as the configured fallback.
+#
+# Lenovo:
+#   Script 02 installs Lenovo System Update for future maintenance.
+#   The Lenovo support HTML page is not scraped because it returns HTTP 403
+#   to scripted requests, so the known-good installer version and direct
+#   download URL are configured here.
+#   Script 03 still uses LSUClient for the first-start automated driver,
+#   BIOS and firmware update workflow.
+#
+
+$DellCommandUpdateOfficialPageUrl =
+    'https://www.dell.com/support/kbdoc/en-us/000177325/dell-command-update'
+
+$DellCommandUpdateFallbackVersion =
+    '5.7.1'
+
+$DellCommandUpdateFallbackDownloadUrl =
+    'https://dl.dell.com/FOLDER14847331M/2/Dell-Command-Update-Windows-Universal-Application_P0P70_WIN64_5.7.1_A00.EXE'
+
+
+$HPImageAssistantOfficialPageUrl =
+    'https://ftp.ext.hp.com/pub/caps-softpaq/cmit/HPIA.html'
+
+$HPImageAssistantFallbackVersion =
+    '5.3.6'
+
+$HPImageAssistantFallbackDownloadUrl =
+    'https://hpia.hpcloud.hp.com/downloads/hpia/hp-hpia-5.3.6.exe'
+
+
+$LenovoSystemUpdateVersion =
+    '5.08.03.59'
+
+# Lenovo support/reference page only.
+# Do not scrape this page from PowerShell because Lenovo currently
+# returns HTTP 403 to scripted requests.
+# https://support.lenovo.com/nz/en/solutions/ht037099
+
+$LenovoSystemUpdateDownloadUrl =
+    'https://download.lenovo.com/pccbbs/thinkvantage_en/system_update_5.08.03.59.exe'
+
+
+$LenovoLSUClientModuleName =
+    'LSUClient'
+
+$LenovoLSUClientRepository =
+    'PSGallery'
+
+$LenovoLSUClientMaximumRounds =
+    3
+
+$LenovoLSUClientUpdateTypes =
+    'Driver,BIOS,Firmware'
+
+$LenovoLSUClientSeverities =
+    'Critical,Recommended'
+
+
+# ============================================================
+# EXPORT OPTIONS TO CHILD POWERSHELL PROCESSES
+# ============================================================
+
+$env:ITINO_WRITE_LOG_FILES =
+    if ($WriteLogFiles) {
+        '1'
+    }
+    else {
+        '0'
+    }
+
+
+
+$env:ITINO_DELETE_DRIVER_ROLLBACK =
+    if ($DeleteDriverRollbackAfterDeployment) {
+        '1'
+    }
+    else {
+        '0'
+    }
+
+
+$env:ITINO_UNATTENDED_MODE =
+    if ($UnattendedMode) {
+        '1'
+    }
+    else {
+        '0'
+    }
+
+
+$env:ITINO_CLOSE_LENOVO_HOTKEY_POPUP =
+    if ($CloseLenovoHotkeyPopup) {
+        '1'
+    }
+    else {
+        '0'
+    }
+
+
+$env:ITINO_REQUIRE_ADMINISTRATOR =
+    if ($RequireAdministrator) {
+        '1'
+    }
+    else {
+        '0'
+    }
+
+
+$env:ITINO_PRESERVE_INITIAL_DRIVER_BASELINE =
+    if ($PreserveInitialDriverBaselineAcrossRestarts) {
+        '1'
+    }
+    else {
+        '0'
+    }
+
+
+$env:ITINO_MINIMUM_FIRMWARE_BATTERY_PERCENT =
+    [string]$MinimumFirmwareBatteryPercent
+
+
+$env:ITINO_MINIMUM_SYSTEM_DRIVE_FREE_GB =
+    [string]$MinimumSystemDriveFreeGB
+
+
+$env:ITINO_WEB_TIMEOUT_SECONDS =
+    [string]$WebTimeoutSeconds
+
+
+$env:ITINO_MINIMUM_POWERSHELL_MAJOR_VERSION =
+    [string]$MinimumPowerShellMajorVersion
+
+
+# OEM source configuration for 02-Install-OEM-Update-Tool.ps1
+
+$env:ITINO_DELL_COMMAND_UPDATE_OFFICIAL_PAGE_URL =
+    [string]$DellCommandUpdateOfficialPageUrl
+
+$env:ITINO_DELL_COMMAND_UPDATE_FALLBACK_VERSION =
+    [string]$DellCommandUpdateFallbackVersion
+
+$env:ITINO_DELL_COMMAND_UPDATE_FALLBACK_DOWNLOAD_URL =
+    [string]$DellCommandUpdateFallbackDownloadUrl
+
+$env:ITINO_HP_IMAGE_ASSISTANT_OFFICIAL_PAGE_URL =
+    [string]$HPImageAssistantOfficialPageUrl
+
+$env:ITINO_HP_IMAGE_ASSISTANT_FALLBACK_VERSION =
+    [string]$HPImageAssistantFallbackVersion
+
+$env:ITINO_HP_IMAGE_ASSISTANT_FALLBACK_DOWNLOAD_URL =
+    [string]$HPImageAssistantFallbackDownloadUrl
+
+
+$env:ITINO_LENOVO_SYSTEM_UPDATE_VERSION =
+    [string]$LenovoSystemUpdateVersion
+
+$env:ITINO_LENOVO_SYSTEM_UPDATE_DOWNLOAD_URL =
+    [string]$LenovoSystemUpdateDownloadUrl
+$env:ITINO_LENOVO_LSUCLIENT_MODULE_NAME =
+    [string]$LenovoLSUClientModuleName
+
+$env:ITINO_LENOVO_LSUCLIENT_REPOSITORY =
+    [string]$LenovoLSUClientRepository
+
+$env:ITINO_LENOVO_LSUCLIENT_MAXIMUM_ROUNDS =
+    [string]$LenovoLSUClientMaximumRounds
+
+$env:ITINO_LENOVO_LSUCLIENT_UPDATE_TYPES =
+    [string]$LenovoLSUClientUpdateTypes
+
+$env:ITINO_LENOVO_LSUCLIENT_SEVERITIES =
+    [string]$LenovoLSUClientSeverities
+
+# ============================================================
+# PATHS
+# ============================================================
+
+$ScriptRoot =
+    $PSScriptRoot
+
+
+$ScriptsPath =
+    Join-Path `
+        $ScriptRoot `
+        'Scripts'
+
+
+$ItinoRoot =
+    'C:\ProgramData\Itino'
+
+
+$BasePath =
+    Join-Path `
+        $ItinoRoot `
+        'DriverDeployment'
+
+
+$DeploymentStateFile =
+    Join-Path `
+        $ItinoRoot `
+        'DriverDeploymentState.json'
+
+
+$DeploymentResultFile =
+    Join-Path `
+        $ItinoRoot `
+        'DriverDeploymentResult.json'
+
+
+$LogPath =
+    Join-Path `
+        $BasePath `
+        'Logs'
+
+
+$MainLogFile =
+    Join-Path `
+        $LogPath `
+        'DriverDeployment-Main.log'
+
+
+$RestartFile =
+    Join-Path `
+        $BasePath `
+        'RestartRequired.txt'
+
+
+$SummaryFile =
+    Join-Path `
+        $BasePath `
+        'DeploymentSummary.json'
+
+
+$VerificationFile =
+    Join-Path `
+        $BasePath `
+        'DriverVerification.json'
+
+
+$HardwareFile =
+    Join-Path `
+        $BasePath `
+        'HardwareInformation.json'
+
+
+# This file deliberately exists OUTSIDE $BasePath.
+#
+# That means normal cleanup cannot remove the failure log.
+
+$PersistentErrorLog =
+    'C:\ProgramData\Itino\DriverDeployment-Error.log'
+
+
+
+$DriverRollbackRoot =
+    'C:\ProgramData\Itino\DriverRollback'
+
+
+# ============================================================
+# SCRIPTS
+# ============================================================
+
+$Scripts =
+    @(
+	
+		[PSCustomObject]@{
+	
+            Name =
+                'Preflight'
+
+            File =
+                '00-Preflight.ps1'
+        }
+
+        [PSCustomObject]@{
+
+            Name =
+                'Gather Hardware'
+
+            File =
+                '01-Gather-Hardware.ps1'
+        }
+
+
+        [PSCustomObject]@{
+
+            Name =
+                'Install OEM Update Tool'
+
+            File =
+                '02-Install-OEM-Update-Tool.ps1'
+        }
+
+
+        [PSCustomObject]@{
+
+            Name =
+                'Update Drivers'
+
+            File =
+                '03-Update-Drivers.ps1'
+        }
+
+
+        [PSCustomObject]@{
+
+            Name =
+                'Verify Drivers'
+
+            File =
+                '04-Verify-Drivers.ps1'
+        }
+    )
+
+
+# ============================================================
+# CREATE REQUIRED DIRECTORIES
+# ============================================================
+
+if (
+    -not (
+        Test-Path -LiteralPath $ItinoRoot
+    )
+) {
+
+    New-Item `
+        -Path $ItinoRoot `
+        -ItemType Directory `
+        -Force |
+        Out-Null
+}
+
+
+if (
+    -not (
+        Test-Path -LiteralPath $BasePath
+    )
+) {
+
+    New-Item `
+        -Path $BasePath `
+        -ItemType Directory `
+        -Force |
+        Out-Null
+}
+
+
+if ($WriteLogFiles) {
+
+    if (
+        -not (
+            Test-Path -LiteralPath $LogPath
+        )
+    ) {
+
+        New-Item `
+            -Path $LogPath `
+            -ItemType Directory `
+            -Force |
+        Out-Null
+    }
+}
+
+
+# ============================================================
+# REMOVE OLD FAILURE LOG
+# ============================================================
+#
+# A new controller run starts with a clean failure state.
+#
+# A previous failure log should not be mistaken for the current
+# deployment result.
+# ============================================================
+
+if (
+    Test-Path -LiteralPath $PersistentErrorLog
+) {
+
+    try {
+
+        Remove-Item `
+            -LiteralPath $PersistentErrorLog `
+            -Force `
+            -ErrorAction Stop
+    }
+    catch {
+
+        Write-Host (
+            'WARNING: Unable to remove previous driver deployment ' +
+            "error log. Error: $($_.Exception.Message)"
+        )
+    }
+}
+
+
+# ============================================================
+# REMOVE OLD RESTART MARKER
+# ============================================================
+#
+# Every controller invocation represents a fresh driver pass.
+#
+# A restart request from the previous pass has already been
+# handled by the parent deployment before this controller is
+# launched again.
+#
+# Child scripts may CREATE or UPDATE this file.
+#
+# Child scripts should not remove it.
+# ============================================================
+
+if (
+    Test-Path -LiteralPath $RestartFile
+) {
+
+    try {
+
+        Remove-Item `
+            -LiteralPath $RestartFile `
+            -Force `
+            -ErrorAction Stop
+    }
+    catch {
+
+        Write-Host (
+            'WARNING: Unable to remove previous restart marker. ' +
+            "Error: $($_.Exception.Message)"
+        )
+    }
+}
+
+
+# ============================================================
+# IN-MEMORY DEPLOYMENT OUTPUT
+# ============================================================
+#
+# All controller messages and child script output are stored here.
+#
+# On success:
+#
+#     The buffer disappears when PowerShell exits.
+#
+# On failure:
+#
+#     The buffer is written to:
+#
+#     C:\ProgramData\Itino\DriverDeployment-Error.log
+#
+# ============================================================
+
+$DeploymentOutputBuffer =
+    New-Object `
+        'System.Collections.Generic.List[string]'
+
+
+# ============================================================
+# ADD BUFFER LINE
+# ============================================================
+
+function Add-DeploymentBufferLine {
+
+    param(
+        [AllowNull()]
+        [string]$Line
+    )
+
+
+    if (
+        $null -eq $Line
+    ) {
+
+        $Line =
+            ''
+    }
+
+
+    [void]$DeploymentOutputBuffer.Add(
+        [string]$Line
+    )
+}
+
+
+# ============================================================
+# LOGGING
+# ============================================================
+
+function Write-Log {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$Message,
+
+        [ValidateSet(
+            'INFO',
+            'WARNING',
+            'ERROR'
+        )]
+        [string]$Level = 'INFO'
+    )
+
+
+    $TimeStamp =
+        Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+
+    $Entry =
+        "[$TimeStamp] [$Level] $Message"
+
+
+    # Always show controller output.
+
+    Write-Host $Entry
+
+
+    # Always preserve controller information in memory.
+
+    Add-DeploymentBufferLine `
+        -Line $Entry
+
+
+    # Persistent normal logs only when enabled.
+
+    if ($WriteLogFiles) {
+
+        Add-Content `
+            -LiteralPath $MainLogFile `
+            -Value $Entry `
+            -Encoding UTF8
+    }
+}
+
+
+# ============================================================
+# RUN CHILD SCRIPT
+# ============================================================
+
+function Invoke-DeploymentScript {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+
+    Write-Host ''
+    Write-Host '============================================================'
+    Write-Host "Starting: $Name"
+    Write-Host '============================================================'
+    Write-Host ''
+
+
+    Write-Log -Message (
+        "Starting stage: $Name"
+    )
+
+
+    if (
+        -not (
+            Test-Path -LiteralPath $Path
+        )
+    ) {
+
+        throw (
+            "Required deployment script was not found: $Path"
+        )
+    }
+
+
+    $StartTime =
+        Get-Date
+
+
+    # ========================================================
+    # ADD STAGE HEADER TO FAILURE BUFFER
+    # ========================================================
+
+    Add-DeploymentBufferLine `
+        -Line ''
+
+
+    Add-DeploymentBufferLine `
+        -Line '============================================================'
+
+
+    Add-DeploymentBufferLine `
+        -Line "STAGE: $Name"
+
+
+    Add-DeploymentBufferLine `
+        -Line "SCRIPT: $Path"
+
+
+    Add-DeploymentBufferLine `
+        -Line '============================================================'
+
+
+    # ========================================================
+    # RUN CHILD POWERSHELL
+    # ========================================================
+    #
+    # powershell.exe is called directly instead of using
+    # Start-Process with output redirection.
+    #
+    # This gives:
+    #
+    #     - live child script console output
+    #     - captured output for failure logging
+    #     - the child process exit code
+    #
+    # ========================================================
+
+    try {
+
+        & powershell.exe `
+            -NoLogo `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -File $Path `
+            2>&1 |
+        ForEach-Object {
+
+            $Line =
+                [string]$_
+
+
+            # Show child output immediately.
+
+            Write-Host $Line
+
+
+            # Keep the exact same output in memory.
+
+            Add-DeploymentBufferLine `
+                -Line $Line
+        }
+
+
+        $ExitCode =
+            $LASTEXITCODE
+
+
+        if (
+            $null -eq $ExitCode
+        ) {
+
+            $ExitCode =
+                1
+        }
+    }
+    catch {
+
+        $ExitCode =
+            1
+
+
+        $LaunchError =
+            (
+                'Unable to run child PowerShell process. ' +
+                $_.Exception.Message
+            )
+
+
+        Write-Host (
+            "ERROR: $LaunchError"
+        )
+
+
+        Add-DeploymentBufferLine `
+            -Line "ERROR: $LaunchError"
+    }
+
+
+    $EndTime =
+        Get-Date
+
+
+    $DurationSeconds =
+        [math]::Round(
+            (
+                $EndTime -
+                $StartTime
+            ).TotalSeconds,
+            1
+        )
+
+
+    # ========================================================
+    # STORE FINAL STAGE RESULT
+    # ========================================================
+
+    Add-DeploymentBufferLine `
+        -Line "EXIT CODE: $ExitCode"
+
+
+    Add-DeploymentBufferLine `
+        -Line (
+            "DURATION: $DurationSeconds seconds"
+        )
+
+
+    Write-Log -Message (
+        "Stage '$Name' finished with exit code $ExitCode."
+    )
+
+
+    Write-Log -Message (
+        "Stage duration: $DurationSeconds seconds."
+    )
+
+
+    return [PSCustomObject]@{
+
+        Name =
+            $Name
+
+        Path =
+            $Path
+
+        ExitCode =
+            $ExitCode
+
+        StartTime =
+            $StartTime
+
+        EndTime =
+            $EndTime
+
+        DurationSeconds =
+            $DurationSeconds
+    }
+}
+
+
+# ============================================================
+# SAVE FAILURE LOG
+# ============================================================
+
+function Save-DeploymentErrorLog {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$FailedStage,
+
+        [Parameter(Mandatory)]
+        [int]$ExitCode
+    )
+
+
+    if (
+        -not $KeepErrorLogOnFailure
+    ) {
+
+        return
+    }
+
+
+    try {
+
+        $ErrorLogContent =
+            @(
+
+                '============================================================'
+
+                'ITINO DRIVER DEPLOYMENT FAILURE'
+
+                '============================================================'
+
+                "Computer     : $env:COMPUTERNAME"
+
+                "Time         : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+
+                "Failed Stage : $FailedStage"
+
+                "Exit Code    : $ExitCode"
+
+                '============================================================'
+
+                ''
+            )
+
+
+        $ErrorLogContent +=
+            $DeploymentOutputBuffer
+
+
+        $ErrorLogContent |
+            Set-Content `
+                -LiteralPath $PersistentErrorLog `
+                -Encoding UTF8
+
+
+        Write-Host ''
+
+        Write-Host (
+            "Driver deployment error log saved to: $PersistentErrorLog"
+        )
+    }
+    catch {
+
+        Write-Host (
+            'ERROR: Unable to create driver deployment error log. ' +
+            "Error: $($_.Exception.Message)"
+        )
+    }
+}
+
+
+
+# ============================================================
+# PHASE 9 - DEPLOYMENT SESSION / SAFETY
+# ============================================================
+
+$script:DeploymentMutex =
+    $null
+
+$script:DeploymentMutexOwned =
+    $false
+
+$script:DeploymentSession =
+    $null
+
+
+function Enter-ItinoDeploymentMutex {
+
+    if (-not $EnableSingleInstanceProtection) {
+        return
+    }
+
+    $script:DeploymentMutex =
+        New-Object System.Threading.Mutex(
+            $false,
+            'Global\ITINO-DriverDeployment'
+        )
+
+    try {
+        $script:DeploymentMutexOwned =
+            $script:DeploymentMutex.WaitOne(0, $false)
+    }
+    catch [System.Threading.AbandonedMutexException] {
+        $script:DeploymentMutexOwned =
+            $true
+    }
+
+    if (-not $script:DeploymentMutexOwned) {
+        throw 'Another ITINO driver deployment is already running.'
+    }
+}
+
+
+function Exit-ItinoDeploymentMutex {
+
+    if (
+        $script:DeploymentMutex -and
+        $script:DeploymentMutexOwned
+    ) {
+        try {
+            $script:DeploymentMutex.ReleaseMutex()
+        }
+        catch {
+        }
+
+        $script:DeploymentMutexOwned =
+            $false
+    }
+
+    if ($script:DeploymentMutex) {
+        try {
+            $script:DeploymentMutex.Dispose()
+        }
+        catch {
+        }
+
+        $script:DeploymentMutex =
+            $null
+    }
+}
+
+
+function Save-ItinoDeploymentSession {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$Status
+    )
+
+    if (-not $script:DeploymentSession) {
+        return
+    }
+
+    $script:DeploymentSession.Status =
+        $Status
+
+    $script:DeploymentSession.LastUpdated =
+        Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+    $script:DeploymentSession |
+        ConvertTo-Json -Depth 8 |
+        Set-Content `
+            -LiteralPath $DeploymentStateFile `
+            -Encoding UTF8
+}
+
+
+function Initialize-ItinoDeploymentSession {
+
+    $Existing =
+        $null
+
+    if (
+        Test-Path -LiteralPath $DeploymentStateFile
+    ) {
+        try {
+            $Existing =
+                Get-Content `
+                    -LiteralPath $DeploymentStateFile `
+                    -Raw `
+                    -ErrorAction Stop |
+                ConvertFrom-Json `
+                    -ErrorAction Stop
+        }
+        catch {
+            Write-Log `
+                -Message (
+                    'Existing deployment state could not be read. ' +
+                    'A new session will be created. ' +
+                    "Reason: $($_.Exception.Message)"
+                ) `
+                -Level 'WARNING'
+        }
+    }
+
+    if (
+        $Existing -and
+        [string]$Existing.ComputerName -eq [string]$env:COMPUTERNAME -and
+        [string]$Existing.Status -in @(
+            'InProgress',
+            'RestartRequired'
+        )
+    ) {
+
+        $Cycle =
+            ([int]$Existing.Cycle) + 1
+
+        if (
+            $Cycle -gt $MaximumDeploymentCycles
+        ) {
+            throw (
+                'Maximum driver deployment cycles exceeded. ' +
+                "Maximum=$MaximumDeploymentCycles; NextCycle=$Cycle."
+            )
+        }
+
+        $script:DeploymentSession =
+            [pscustomobject]@{
+                SessionId = [string]$Existing.SessionId
+                ComputerName = $env:COMPUTERNAME
+                Started = [string]$Existing.Started
+                LastUpdated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+                Cycle = $Cycle
+                MaximumCycles = $MaximumDeploymentCycles
+                Status = 'InProgress'
+            }
+    }
+    else {
+
+        $script:DeploymentSession =
+            [pscustomobject]@{
+                SessionId = ([guid]::NewGuid().ToString('N'))
+                ComputerName = $env:COMPUTERNAME
+                Started = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+                LastUpdated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+                Cycle = 1
+                MaximumCycles = $MaximumDeploymentCycles
+                Status = 'InProgress'
+            }
+    }
+
+    Save-ItinoDeploymentSession -Status 'InProgress'
+
+    $env:ITINO_DEPLOYMENT_SESSION_ID =
+        [string]$script:DeploymentSession.SessionId
+
+    $env:ITINO_DEPLOYMENT_CYCLE =
+        [string]$script:DeploymentSession.Cycle
+
+    Write-Log -Message (
+        'Deployment session: ' +
+        "$($script:DeploymentSession.SessionId); " +
+        "Cycle=$($script:DeploymentSession.Cycle)/$MaximumDeploymentCycles"
+    )
+}
+
+
+function Get-ItinoFirmwareSafety {
+
+    $BatteryPresent =
+        $false
+
+    $BatteryPercent =
+        $null
+
+    $OnExternalPower =
+        $true
+
+    $Reason =
+        'No battery detected; firmware power safety passed.'
+
+    try {
+
+        $Batteries =
+            @(
+                Get-CimInstance `
+                    -ClassName Win32_Battery `
+                    -ErrorAction Stop
+            )
+
+        if ($Batteries.Count -gt 0) {
+
+            $BatteryPresent =
+                $true
+
+            $PercentValues =
+                @(
+                    $Batteries |
+                    ForEach-Object {
+                        if ($null -ne $_.EstimatedChargeRemaining) {
+                            [int]$_.EstimatedChargeRemaining
+                        }
+                    }
+                )
+
+            if ($PercentValues.Count -gt 0) {
+                $BatteryPercent =
+                    (
+                        $PercentValues |
+                        Measure-Object -Minimum
+                    ).Minimum
+            }
+
+            $Discharging =
+                @(
+                    $Batteries |
+                    Where-Object {
+                        [int]$_.BatteryStatus -eq 1
+                    }
+                ).Count -gt 0
+
+            $OnExternalPower =
+                -not $Discharging
+
+            if (-not $OnExternalPower) {
+                $Reason =
+                    'Battery is discharging.'
+            }
+            elseif (
+                $null -ne $BatteryPercent -and
+                $BatteryPercent -lt $MinimumFirmwareBatteryPercent
+            ) {
+                $Reason =
+                    (
+                        "Battery charge is $BatteryPercent%. " +
+                        "Minimum is $MinimumFirmwareBatteryPercent%."
+                    )
+            }
+            else {
+                $Reason =
+                    'External-power/battery requirements passed.'
+            }
+        }
+    }
+    catch {
+
+        $OnExternalPower =
+            $false
+
+        $Reason =
+            (
+                'Power state could not be determined. ' +
+                "Firmware updates blocked. Reason: $($_.Exception.Message)"
+            )
+    }
+
+    $Allowed =
+        $OnExternalPower -and
+        (
+            $null -eq $BatteryPercent -or
+            $BatteryPercent -ge $MinimumFirmwareBatteryPercent
+        )
+
+    return [pscustomobject]@{
+        Allowed = $Allowed
+        BatteryPresent = $BatteryPresent
+        BatteryPercent = $BatteryPercent
+        OnExternalPower = $OnExternalPower
+        Reason = $Reason
+    }
+}
+
+
+function Get-ItinoBitLockerSummary {
+
+    try {
+
+        $ManageBde =
+            Join-Path `
+                $env:SystemRoot `
+                'System32\manage-bde.exe'
+
+        if (-not (
+            Test-Path -LiteralPath $ManageBde
+        )) {
+            return 'Unknown - manage-bde.exe not found'
+        }
+
+        $Output =
+            @(
+                & $ManageBde `
+                    -status `
+                    $env:SystemDrive `
+                    2>&1
+            )
+
+        $ProtectionLine =
+            $Output |
+            Where-Object {
+                [string]$_ -match 'Protection Status|Beskyttelsesstatus'
+            } |
+            Select-Object -First 1
+
+        if ($ProtectionLine) {
+            return ([string]$ProtectionLine).Trim()
+        }
+
+        return 'BitLocker queried; protection line not recognized.'
+    }
+    catch {
+        return (
+            'Unknown - BitLocker query failed: ' +
+            $_.Exception.Message
+        )
+    }
+}
+
+
+function Save-ItinoMachineReadableResult {
+
+    param(
+        [Parameter(Mandatory)]
+        [int]$ExitCode,
+
+        [Parameter(Mandatory)]
+        [string]$Status
+    )
+
+    [pscustomobject]@{
+        ComputerName = $env:COMPUTERNAME
+        SessionId =
+            if ($script:DeploymentSession) {
+                $script:DeploymentSession.SessionId
+            }
+            else {
+                $null
+            }
+        Cycle =
+            if ($script:DeploymentSession) {
+                $script:DeploymentSession.Cycle
+            }
+            else {
+                $null
+            }
+        Status = $Status
+        ExitCode = $ExitCode
+        RestartRequired = ($ExitCode -eq 3010)
+        FailedStage = $FailedStage
+        Completed = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    } |
+        ConvertTo-Json -Depth 6 |
+        Set-Content `
+            -LiteralPath $DeploymentResultFile `
+            -Encoding UTF8
+}
+
+
+function Remove-EntireItinoRoot {
+
+    if (-not $DeleteEntireItinoRootOnCleanSuccess) {
+        return
+    }
+
+    Write-Host ''
+    Write-Host (
+        "Final clean success. Removing complete ITINO data root: $ItinoRoot"
+    )
+
+    try {
+
+        if (
+            Test-Path -LiteralPath $ItinoRoot
+        ) {
+            Remove-Item `
+                -LiteralPath $ItinoRoot `
+                -Recurse `
+                -Force `
+                -ErrorAction Stop
+        }
+
+        Write-Host (
+            'All ITINO-generated ProgramData files were removed.'
+        )
+    }
+    catch {
+        Write-Host (
+            'WARNING: Deployment succeeded, but the complete ITINO ' +
+            "ProgramData root could not be removed. Error: $($_.Exception.Message)"
+        )
+    }
+}
+
+
+# ============================================================
+# CLEANUP
+# ============================================================
+
+
+function Remove-DriverRollbackData {
+
+    if (-not $DeleteDriverRollbackAfterDeployment) {
+
+        Write-Log -Message (
+            'Driver rollback cleanup is disabled.'
+        )
+
+        return
+    }
+
+
+    if (-not (
+        Test-Path -LiteralPath $DriverRollbackRoot
+    )) {
+
+        Write-Log -Message (
+            "Driver rollback folder does not exist: $DriverRollbackRoot"
+        )
+
+        return
+    }
+
+
+    Write-Log -Message (
+        "Removing driver rollback folder: $DriverRollbackRoot"
+    )
+
+
+    try {
+
+        Remove-Item `
+            -LiteralPath $DriverRollbackRoot `
+            -Recurse `
+            -Force `
+            -ErrorAction Stop
+
+
+        Write-Host (
+            "Removed driver rollback folder: $DriverRollbackRoot"
+        )
+    }
+    catch {
+
+        Write-Log `
+            -Message (
+                'Unable to completely remove the driver rollback folder. ' +
+                "Reason: $($_.Exception.Message)"
+            ) `
+            -Level 'WARNING'
+    }
+}
+
+
+function Invoke-FinalCleanup {
+
+    if (
+        -not $CleanupAfterDeployment
+    ) {
+
+        Write-Log -Message (
+            'Deployment cleanup is disabled.'
+        )
+
+
+        return
+    }
+
+
+    Write-Host ''
+
+    Write-Host (
+        "Cleaning driver deployment working folder: $BasePath"
+    )
+
+
+    try {
+
+        if (
+            Test-Path -LiteralPath $BasePath
+        ) {
+
+            Remove-Item `
+                -LiteralPath $BasePath `
+                -Recurse `
+                -Force `
+                -ErrorAction Stop
+        }
+
+
+        Write-Host (
+            'Driver deployment working files removed.'
+        )
+    }
+    catch {
+
+        Write-Host (
+            'WARNING: Unable to completely remove driver deployment ' +
+            "working files. Error: $($_.Exception.Message)"
+        )
+    }
+
+
+    # Phase 8.1 rollback data lives outside $BasePath, so clean
+    # it separately when requested.
+    Remove-DriverRollbackData
+
+}
+
+
+# ============================================================
+# OEM CONFIGURATION VALIDATION
+# ============================================================
+
+function Test-ConfiguredHttpsUrl {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [AllowEmptyString()]
+        [string]$Value
+    )
+
+    if (
+        [string]::IsNullOrWhiteSpace(
+            $Value
+        )
+    ) {
+
+        throw (
+            "OEM configuration error: '$Name' is empty. " +
+            'Fix the OEM DOWNLOAD CONFIGURATION section in ' +
+            'Run-DriverDeployment.ps1.'
+        )
+    }
+
+
+    $Uri =
+        $null
+
+
+    if (
+        -not [Uri]::TryCreate(
+            $Value,
+            [UriKind]::Absolute,
+            [ref]$Uri
+        )
+    ) {
+
+        throw (
+            "OEM configuration error: '$Name' is not a valid absolute URL. " +
+            "Configured value: '$Value'."
+        )
+    }
+
+
+    if (
+        $Uri.Scheme -ne 'https'
+    ) {
+
+        throw (
+            "OEM configuration error: '$Name' must use HTTPS. " +
+            "Configured value: '$Value'."
+        )
+    }
+}
+
+
+function Test-ConfiguredVersion {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [AllowEmptyString()]
+        [string]$Value
+    )
+
+    if (
+        [string]::IsNullOrWhiteSpace(
+            $Value
+        )
+    ) {
+
+        throw (
+            "OEM configuration error: '$Name' is empty. " +
+            'Fix the OEM DOWNLOAD CONFIGURATION section in ' +
+            'Run-DriverDeployment.ps1.'
+        )
+    }
+
+
+    $Normalized =
+        $Value.Trim() -replace '[^0-9\.]', ''
+
+
+    $ParsedVersion =
+        $null
+
+
+    if (
+        -not [version]::TryParse(
+            $Normalized,
+            [ref]$ParsedVersion
+        )
+    ) {
+
+        throw (
+            "OEM configuration error: '$Name' is not a valid version. " +
+            "Configured value: '$Value'."
+        )
+    }
+}
+
+
+function Assert-OemControllerConfiguration {
+
+    Test-ConfiguredHttpsUrl `
+        -Name 'Dell official page URL' `
+        -Value $DellCommandUpdateOfficialPageUrl
+
+    Test-ConfiguredVersion `
+        -Name 'Dell fallback version' `
+        -Value $DellCommandUpdateFallbackVersion
+
+    Test-ConfiguredHttpsUrl `
+        -Name 'Dell fallback download URL' `
+        -Value $DellCommandUpdateFallbackDownloadUrl
+
+
+    Test-ConfiguredHttpsUrl `
+        -Name 'HP Image Assistant official page URL' `
+        -Value $HPImageAssistantOfficialPageUrl
+
+    Test-ConfiguredVersion `
+        -Name 'HP Image Assistant fallback version' `
+        -Value $HPImageAssistantFallbackVersion
+
+    Test-ConfiguredHttpsUrl `
+        -Name 'HP Image Assistant fallback download URL' `
+        -Value $HPImageAssistantFallbackDownloadUrl
+
+
+    Test-ConfiguredVersion `
+        -Name 'Lenovo System Update version' `
+        -Value $LenovoSystemUpdateVersion
+
+    Test-ConfiguredHttpsUrl `
+        -Name 'Lenovo System Update download URL' `
+        -Value $LenovoSystemUpdateDownloadUrl
+
+
+    if (
+        [string]::IsNullOrWhiteSpace(
+            $LenovoLSUClientModuleName
+        )
+    ) {
+
+        throw (
+            'OEM configuration error: Lenovo LSUClient module name is empty. ' +
+            'Fix the OEM DOWNLOAD CONFIGURATION section in ' +
+            'Run-DriverDeployment.ps1.'
+        )
+    }
+
+
+    if (
+        [string]::IsNullOrWhiteSpace(
+            $LenovoLSUClientRepository
+        )
+    ) {
+
+        throw (
+            'OEM configuration error: Lenovo LSUClient repository is empty. ' +
+            'Fix the OEM DOWNLOAD CONFIGURATION section in ' +
+            'Run-DriverDeployment.ps1.'
+        )
+    }
+
+
+    if (
+        $LenovoLSUClientMaximumRounds -lt 1
+    ) {
+
+        throw (
+            'OEM configuration error: Lenovo LSUClient maximum rounds must ' +
+            'be 1 or greater.'
+        )
+    }
+}
+
+
+# ============================================================
+
+
+# ============================================================
+# FINAL CONSOLE OUTPUT
+# ============================================================
+
+function Show-DeploymentFinished {
+    param(
+        [Parameter(Mandatory)]
+        [int]$ExitCode,
+
+        [Parameter(Mandatory)]
+        [string]$Status,
+
+        [Parameter(Mandatory)]
+        [bool]$RestartRequired,
+
+        [AllowNull()]
+        [string]$FailedStage
+    )
+
+    Write-Host ''
+    Write-Host '============================================================'
+    Write-Host 'Deployment Finished'
+    Write-Host '============================================================'
+    Write-Host ''
+    Write-Host "Status           : $Status"
+    Write-Host "Exit Code        : $ExitCode"
+    Write-Host "Restart Required : $RestartRequired"
+
+    if (-not [string]::IsNullOrWhiteSpace($FailedStage)) {
+        Write-Host "Failed Stage     : $FailedStage"
+    }
+
+    Write-Host ''
+    Write-Host '============================================================'
+}
+
+
+function Read-ItinoJsonFile {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Description
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Write-Log -Message "$Description was not available at '$Path'." -Level 'WARNING'
+        return $null
+    }
+
+    try {
+        return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop)
+    }
+    catch {
+        Write-Log -Message ("Unable to read $Description from '$Path'. Reason: " + $_.Exception.Message) -Level 'WARNING'
+        return $null
+    }
+}
+
+function Get-RestartMarkerReasons {
+    $Reasons = @()
+
+    if (-not (Test-Path -LiteralPath $RestartFile)) {
+        return $Reasons
+    }
+
+    try {
+        foreach ($Line in @(Get-Content -LiteralPath $RestartFile -ErrorAction Stop)) {
+            if ($Line -match '^\s*Reason\s*=\s*(.+?)\s*$') {
+                $Reasons += $Matches[1]
+            }
+        }
+    }
+    catch {
+        Write-Log -Message ('Unable to read restart reasons from RestartRequired.txt. Reason: ' + $_.Exception.Message) -Level 'WARNING'
+    }
+
+    return @($Reasons | Select-Object -Unique)
+}
+
+function Get-StageSummaryByName {
+    param(
+        [Parameter(Mandatory)][object[]]$Results,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    return ($Results | Where-Object { $_.Name -eq $Name } | Select-Object -First 1)
+}
+
+function Get-FirstPropertyValue {
+    param(
+        [Parameter(Mandatory)]$Object,
+        [Parameter(Mandatory)][string[]]$Names
+    )
+
+    foreach ($Name in $Names) {
+        if ($null -ne $Object.PSObject.Properties[$Name]) {
+            return $Object.$Name
+        }
+    }
+
+    return $null
+}
+
+function Get-ControllerDeviceDisplayName {
+
+    param(
+        [Parameter(Mandatory)]
+        [object]$Device
+    )
+
+
+    $CandidateProperties =
+        @(
+            'Name',
+            'FriendlyName',
+            'InstanceId',
+            'InstanceID',
+            'DeviceID',
+            'PNPDeviceID'
+        )
+
+
+    foreach (
+        $PropertyName in $CandidateProperties
+    ) {
+
+        $Property =
+            $Device.PSObject.Properties[
+                $PropertyName
+            ]
+
+
+        if (
+            $null -eq $Property
+        ) {
+
+            continue
+        }
+
+
+        $Value =
+            [string]$Property.Value
+
+
+        if (
+            -not [string]::IsNullOrWhiteSpace(
+                $Value
+            )
+        ) {
+
+            return $Value.Trim()
+        }
+    }
+
+
+    return 'Unknown device'
+}
+
+
+function Show-DriverVerification {
+    Write-Host ''
+    Write-Host '============================================================'
+    Write-Host 'Driver Verification'
+    Write-Host '============================================================'
+    Write-Host ''
+
+    if (-not (Test-Path -LiteralPath $VerificationFile)) {
+        Write-Host '[WARNING] DriverVerification.json was not available.'
+        Write-Host ''
+        Write-Host '============================================================'
+        return
+    }
+
+    try {
+        $Verification =
+            Get-Content `
+                -LiteralPath $VerificationFile `
+                -Raw |
+            ConvertFrom-Json
+
+
+        $VerificationStatus =
+            $null
+
+
+        $VerificationRestartRequired =
+            $null
+
+
+        if (
+            $Verification.Results
+        ) {
+
+            $VerificationStatus =
+                $Verification.Results.Status
+
+            $VerificationRestartRequired =
+                $Verification.Results.RestartRequired
+        }
+
+
+        if (
+            $null -eq $VerificationStatus
+        ) {
+
+            $VerificationStatus =
+                $Verification.Status
+        }
+
+
+        if (
+            $null -eq $VerificationRestartRequired
+        ) {
+
+            $VerificationRestartRequired =
+                $Verification.RestartRequired
+        }
+
+
+        if (
+            $null -ne $VerificationStatus
+        ) {
+
+            Write-Host (
+                "Status             : $VerificationStatus"
+            )
+        }
+
+
+        if (
+            $null -ne $VerificationRestartRequired
+        ) {
+
+            Write-Host (
+                "Restart Required   : $VerificationRestartRequired"
+            )
+        }
+
+
+        if (
+            $Verification.Results
+        ) {
+
+            $BeforeErrors =
+                if (
+                    $null -ne $Verification.Results.DeviceErrorsBefore
+                ) {
+                    $Verification.Results.DeviceErrorsBefore
+                }
+                else {
+                    $Verification.Results.BeforeErrorCount
+                }
+
+
+            $AfterErrors =
+                if (
+                    $null -ne $Verification.Results.DeviceErrorsAfter
+                ) {
+                    $Verification.Results.DeviceErrorsAfter
+                }
+                else {
+                    $Verification.Results.AfterErrorCount
+                }
+
+
+            $FixedErrors =
+                if (
+                    $null -ne $Verification.Results.FixedDeviceErrors
+                ) {
+                    $Verification.Results.FixedDeviceErrors
+                }
+                else {
+                    $Verification.Results.FixedCount
+                }
+
+
+            $RemainingErrors =
+                if (
+                    $null -ne $Verification.Results.RemainingDeviceErrors
+                ) {
+                    $Verification.Results.RemainingDeviceErrors
+                }
+                else {
+                    $Verification.Results.RemainingCount
+                }
+
+
+            $NewErrors =
+                if (
+                    $null -ne $Verification.Results.NewDeviceErrors
+                ) {
+                    $Verification.Results.NewDeviceErrors
+                }
+                else {
+                    $Verification.Results.NewCount
+                }
+
+
+            $RestartDevices =
+                if (
+                    $null -ne $Verification.Results.RestartDevices
+                ) {
+                    $Verification.Results.RestartDevices
+                }
+                else {
+                    $Verification.Results.RestartDeviceCount
+                }
+
+
+            if (
+                $null -ne $BeforeErrors
+            ) {
+                Write-Host (
+                    "Before Errors      : $BeforeErrors"
+                )
+            }
+
+
+            if (
+                $null -ne $AfterErrors
+            ) {
+                Write-Host (
+                    "After Errors       : $AfterErrors"
+                )
+            }
+
+
+            if (
+                $null -ne $FixedErrors
+            ) {
+                Write-Host (
+                    "Fixed Errors       : $FixedErrors"
+                )
+            }
+
+
+            if (
+                $null -ne $RemainingErrors
+            ) {
+                Write-Host (
+                    "Remaining Errors   : $RemainingErrors"
+                )
+            }
+
+
+            if (
+                $null -ne $NewErrors
+            ) {
+                Write-Host (
+                    "New Errors         : $NewErrors"
+                )
+            }
+
+
+            if (
+                $null -ne $RestartDevices
+            ) {
+                Write-Host (
+                    "Restart Devices    : $RestartDevices"
+                )
+            }
+        }
+
+
+        if (
+            $Verification.FixedDevices -and
+            $Verification.FixedDevices.Count -gt 0
+        ) {
+
+            Write-Host ''
+            Write-Host 'Fixed Devices:'
+
+
+            foreach (
+                $Device in $Verification.FixedDevices
+            ) {
+
+                $DisplayName =
+                    Get-ControllerDeviceDisplayName `
+                        -Device $Device
+
+
+                Write-Host (
+                    "  [FIXED] $DisplayName"
+                )
+            }
+        }
+
+
+        if (
+            $Verification.RemainingDevices -and
+            $Verification.RemainingDevices.Count -gt 0
+        ) {
+
+            Write-Host ''
+            Write-Host 'Remaining Device Errors:'
+
+
+            foreach (
+                $Device in $Verification.RemainingDevices
+            ) {
+
+                $DisplayName =
+                    Get-ControllerDeviceDisplayName `
+                        -Device $Device
+
+
+                Write-Host (
+                    "  [REMAINING] $DisplayName " +
+                    "(Code $($Device.ConfigManagerErrorCode))"
+                )
+            }
+        }
+
+
+        $CurrentNewErrors =
+            $null
+
+
+        if (
+            $Verification.NewErrors
+        ) {
+
+            $CurrentNewErrors =
+                $Verification.NewErrors
+        }
+        elseif (
+            $Verification.NewDevices
+        ) {
+
+            $CurrentNewErrors =
+                $Verification.NewDevices
+        }
+
+
+        if (
+            $CurrentNewErrors -and
+            $CurrentNewErrors.Count -gt 0
+        ) {
+
+            Write-Host ''
+            Write-Host 'New Device Errors:'
+
+
+            foreach (
+                $Device in $CurrentNewErrors
+            ) {
+
+                $DisplayName =
+                    Get-ControllerDeviceDisplayName `
+                        -Device $Device
+
+
+                Write-Host (
+                    "  [NEW] $DisplayName " +
+                    "(Code $($Device.ConfigManagerErrorCode))"
+                )
+            }
+        }
+    }
+    catch {
+
+        Write-Host (
+            '[WARNING] Unable to read DriverVerification.json. Reason: ' +
+            $_.Exception.Message
+        )
+    }
+
+    Write-Host ''
+    Write-Host '============================================================'
+}
+
+# MAIN STATE
+# ============================================================
+
+$Results =
+    @()
+
+
+$RestartRequired =
+    $false
+
+
+$DeploymentFailed =
+    $false
+
+
+$FailedStage =
+    $null
+
+
+$FinalExitCode =
+    1
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+try {
+
+    Write-Host ''
+    Write-Host '============================================================'
+    Write-Host 'ITINO Driver Deployment'
+    Write-Host '============================================================'
+    Write-Host ''
+
+
+    Write-Log -Message (
+        'Driver deployment started.'
+    )
+
+
+    Write-Log -Message (
+        "Controller script: $ScriptName"
+    )
+
+
+    Write-Log -Message (
+        "Controller version: $ScriptVersion"
+    )
+
+
+    Write-Log -Message (
+        "Controller updated: $ScriptUpdated"
+    )
+
+
+    Write-Log -Message (
+        "Controller directory: $ScriptRoot"
+    )
+
+
+    Write-Log -Message (
+        "Scripts directory: $ScriptsPath"
+    )
+
+
+    Write-Log -Message (
+        "Write log files: $WriteLogFiles"
+    )
+
+
+    Write-Log -Message (
+        "Keep error log on failure: $KeepErrorLogOnFailure"
+    )
+
+
+    Write-Log -Message (
+        "Cleanup after deployment: $CleanupAfterDeployment"
+    )
+
+
+
+    Write-Log -Message (
+        "Delete DriverRollback folder after final deployment: $DeleteDriverRollbackAfterDeployment"
+    )
+
+
+    Write-Log -Message (
+        "Unattended mode: $UnattendedMode"
+    )
+
+
+    Write-Log -Message (
+        "Close Lenovo Hotkey popup: $CloseLenovoHotkeyPopup"
+    )
+
+
+    Write-Log -Message (
+        "Require administrator: $RequireAdministrator"
+    )
+
+
+    Write-Log -Message (
+        "Maximum deployment cycles: $MaximumDeploymentCycles"
+    )
+
+    Write-Log -Message (
+        "Preserve original driver baseline across restarts: $PreserveInitialDriverBaselineAcrossRestarts"
+    )
+
+    Write-Log -Message (
+        "Preserve artifacts on failure: $PreserveArtifactsOnFailure"
+    )
+
+    Write-Log -Message (
+        "Delete complete ITINO root on clean success: $DeleteEntireItinoRootOnCleanSuccess"
+    )
+
+    Write-Log -Message (
+        "Minimum firmware battery percent: $MinimumFirmwareBatteryPercent"
+    )
+
+	Write-Log -Message (
+		"Minimum system drive free space: $MinimumSystemDriveFreeGB GB"
+	)
+
+
+	Write-Log -Message (
+		"Web connectivity timeout: $WebTimeoutSeconds seconds"
+	)
+
+
+	Write-Log -Message (
+		"Minimum PowerShell major version: $MinimumPowerShellMajorVersion"
+	)
+
+
+    # ========================================================
+    # PHASE 9 - SESSION / SINGLE INSTANCE / FIRMWARE SAFETY
+    # ========================================================
+
+    Enter-ItinoDeploymentMutex
+
+    Initialize-ItinoDeploymentSession
+
+    $FirmwareSafety =
+        Get-ItinoFirmwareSafety
+
+    $env:ITINO_ALLOW_FIRMWARE_UPDATES =
+        if ($FirmwareSafety.Allowed) {
+            '1'
+        }
+        else {
+            '0'
+        }
+
+    Write-Log -Message (
+        'Firmware power safety: ' +
+        "Allowed=$($FirmwareSafety.Allowed); " +
+        "BatteryPresent=$($FirmwareSafety.BatteryPresent); " +
+        "BatteryPercent=$($FirmwareSafety.BatteryPercent); " +
+        "ExternalPower=$($FirmwareSafety.OnExternalPower); " +
+        "Reason=$($FirmwareSafety.Reason)"
+    )
+
+    Write-Log -Message (
+        "BitLocker: $(Get-ItinoBitLockerSummary)"
+    )
+
+
+    # ========================================================
+    # OEM DOWNLOAD CONFIGURATION
+    # ========================================================
+
+    Write-Log -Message (
+        "Dell official discovery URL: $DellCommandUpdateOfficialPageUrl"
+    )
+
+    Write-Log -Message (
+        "Dell fallback version: $DellCommandUpdateFallbackVersion"
+    )
+
+    Write-Log -Message (
+        "Dell fallback download URL: $DellCommandUpdateFallbackDownloadUrl"
+    )
+
+    Write-Log -Message (
+        "HP official discovery URL: $HPImageAssistantOfficialPageUrl"
+    )
+
+    Write-Log -Message (
+        "HP fallback version: $HPImageAssistantFallbackVersion"
+    )
+
+    Write-Log -Message (
+        "HP fallback download URL: $HPImageAssistantFallbackDownloadUrl"
+    )
+
+    Write-Log -Message (
+        "Lenovo System Update version for future maintenance: $LenovoSystemUpdateVersion"
+    )
+
+    Write-Log -Message (
+        "Lenovo System Update download URL: $LenovoSystemUpdateDownloadUrl"
+    )
+
+    Write-Log -Message (
+        "Lenovo first-start update engine: $LenovoLSUClientModuleName"
+    )
+
+    Write-Log -Message (
+        "Lenovo module repository: $LenovoLSUClientRepository"
+    )
+
+    Write-Log -Message (
+        "Lenovo maximum LSUClient rounds: $LenovoLSUClientMaximumRounds"
+    )
+
+    Write-Log -Message (
+        "Lenovo LSUClient update types: $LenovoLSUClientUpdateTypes"
+    )
+
+    Write-Log -Message (
+        "Lenovo LSUClient severities: $LenovoLSUClientSeverities"
+    )
+
+
+    Write-Log -Message (
+        'Validating centralized OEM download configuration.'
+    )
+
+
+    Assert-OemControllerConfiguration
+
+
+    Write-Log -Message (
+        'Centralized OEM download configuration is valid.'
+    )
+
+    # ========================================================
+    # VERIFY ALL SCRIPTS EXIST
+    # ========================================================
+
+    Write-Log -Message (
+        'Checking required deployment scripts.'
+    )
+
+
+    foreach (
+        $Script in $Scripts
+    ) {
+
+        $Path =
+            Join-Path `
+                $ScriptsPath `
+                $Script.File
+
+
+        if (
+            -not (
+                Test-Path -LiteralPath $Path
+            )
+        ) {
+
+            throw (
+                "Required script missing: $Path"
+            )
+        }
+
+
+        Write-Log -Message (
+            "Found: $($Script.File)"
+        )
+    }
+
+
+    # ========================================================
+    # RUN STAGES
+    # ========================================================
+
+    $ControllerStartTime =
+        Get-Date
+
+
+    foreach (
+        $Script in $Scripts
+    ) {
+
+        if (
+            (
+                (Get-Date) -
+                $ControllerStartTime
+            ).TotalMinutes -gt $MaximumControllerRuntimeMinutes
+        ) {
+            throw (
+                'Maximum controller runtime exceeded before stage ' +
+                "'$($Script.Name)'."
+            )
+        }
+
+
+        $ScriptPath =
+            Join-Path `
+                $ScriptsPath `
+                $Script.File
+
+
+        $Result =
+            Invoke-DeploymentScript `
+                -Name $Script.Name `
+                -Path $ScriptPath
+
+
+        $Results +=
+            $Result
+
+
+        # ====================================================
+        # HANDLE EXIT CODE
+        # ====================================================
+
+        switch (
+            $Result.ExitCode
+        ) {
+
+            0 {
+
+                Write-Log -Message (
+                    "Stage '$($Script.Name)' completed successfully."
+                )
+            }
+
+
+            3010 {
+
+                Write-Log `
+                    -Message (
+                        "Stage '$($Script.Name)' completed successfully " +
+                        'and requested a restart.'
+                    ) `
+                    -Level 'WARNING'
+
+
+                $RestartRequired =
+                    $true
+            }
+
+
+            default {
+
+                Write-Log `
+                    -Message (
+                        "Stage '$($Script.Name)' failed with exit code " +
+                        "$($Result.ExitCode)."
+                    ) `
+                    -Level 'ERROR'
+
+
+                $DeploymentFailed =
+                    $true
+
+
+                $FailedStage =
+                    $Script.Name
+            }
+        }
+
+
+        if ($DeploymentFailed) {
+
+            Write-Log `
+                -Message (
+                    'Stopping driver deployment because a stage failed.'
+                ) `
+                -Level 'ERROR'
+
+
+            break
+        }
+    }
+
+
+    # ========================================================
+    # RESTART MARKER
+    # ========================================================
+
+    if (
+        Test-Path -LiteralPath $RestartFile
+    ) {
+
+        $RestartRequired =
+            $true
+
+
+        Write-Log `
+            -Message (
+                'RestartRequired.txt exists. A restart is required.'
+            ) `
+            -Level 'WARNING'
+    }
+
+
+    # ========================================================
+    # OVERALL STATUS
+    # ========================================================
+
+    if ($DeploymentFailed) {
+
+        $OverallStatus =
+            'Failed'
+    }
+    elseif ($RestartRequired) {
+
+        $OverallStatus =
+            'SuccessRestartRequired'
+    }
+    else {
+
+        $OverallStatus =
+            'Success'
+    }
+
+
+    # ========================================================
+    # DEPLOYMENT SUMMARY
+    # ========================================================
+
+    $HardwareInformation =
+        Read-ItinoJsonFile `
+            -Path $HardwareFile `
+            -Description 'HardwareInformation.json'
+
+    $DriverVerification =
+        Read-ItinoJsonFile `
+            -Path $VerificationFile `
+            -Description 'DriverVerification.json'
+
+    $RestartReasons =
+        @(
+            Get-RestartMarkerReasons
+        )
+
+    $UpdateDriversStage =
+        Get-StageSummaryByName `
+            -Results $Results `
+            -Name 'Update Drivers'
+
+    $ComputerSummary =
+        [PSCustomObject]@{
+            ComputerName = $env:COMPUTERNAME
+            Manufacturer = $null
+            Model = $null
+            SerialNumber = $null
+            Windows = $null
+        }
+
+    if ($HardwareInformation) {
+        if ($HardwareInformation.Computer) {
+            $ComputerSummary.ComputerName =
+                Get-FirstPropertyValue -Object $HardwareInformation.Computer -Names @('ComputerName','Name')
+
+            $ComputerSummary.Manufacturer =
+                Get-FirstPropertyValue -Object $HardwareInformation.Computer -Names @('Manufacturer')
+
+            $ComputerSummary.Model =
+                Get-FirstPropertyValue -Object $HardwareInformation.Computer -Names @('Model')
+        }
+
+        if ($HardwareInformation.BIOS) {
+            $ComputerSummary.SerialNumber =
+                Get-FirstPropertyValue -Object $HardwareInformation.BIOS -Names @('SerialNumber','Serial')
+        }
+
+        if ($HardwareInformation.Windows) {
+            $ComputerSummary.Windows =
+                [PSCustomObject]@{
+                    Caption =
+                        Get-FirstPropertyValue -Object $HardwareInformation.Windows -Names @('Caption','ProductName')
+
+                    Version =
+                        Get-FirstPropertyValue -Object $HardwareInformation.Windows -Names @('Version')
+
+                    BuildNumber =
+                        Get-FirstPropertyValue -Object $HardwareInformation.Windows -Names @('BuildNumber','Build')
+
+                    Architecture =
+                        Get-FirstPropertyValue -Object $HardwareInformation.Windows -Names @('Architecture','OSArchitecture')
+                }
+        }
+    }
+
+    $VerificationSummary = $null
+    $DriverChangesSummary = $null
+    $DriverSnapshotsSummary = $null
+    $OEMToolsSummary = @()
+
+    if ($DriverVerification) {
+        $VerificationResults =
+            if ($DriverVerification.Results) {
+                $DriverVerification.Results
+            }
+            else {
+                $DriverVerification
+            }
+
+        $VerificationSummary =
+            [PSCustomObject]@{
+                Status =
+                    Get-FirstPropertyValue -Object $VerificationResults -Names @('Status')
+
+                DeviceErrorsBefore =
+                    Get-FirstPropertyValue -Object $VerificationResults -Names @('DeviceErrorsBefore','BeforeErrorCount')
+
+                DeviceErrorsAfter =
+                    Get-FirstPropertyValue -Object $VerificationResults -Names @('DeviceErrorsAfter','AfterErrorCount')
+
+                FixedDeviceErrors =
+                    Get-FirstPropertyValue -Object $VerificationResults -Names @('FixedDeviceErrors','FixedCount')
+
+                RemainingDeviceErrors =
+                    Get-FirstPropertyValue -Object $VerificationResults -Names @('RemainingDeviceErrors','RemainingCount')
+
+                NewDeviceErrors =
+                    Get-FirstPropertyValue -Object $VerificationResults -Names @('NewDeviceErrors','NewCount')
+
+                RestartDevices =
+                    Get-FirstPropertyValue -Object $VerificationResults -Names @('RestartDevices','RestartDeviceCount')
+
+                RestartRequired =
+                    Get-FirstPropertyValue -Object $VerificationResults -Names @('RestartRequired')
+
+                WindowsPendingRestart =
+                    Get-FirstPropertyValue -Object $VerificationResults -Names @('WindowsPendingRestart')
+
+                WindowsPendingRestartReasons =
+                    @(
+                        Get-FirstPropertyValue -Object $VerificationResults -Names @('WindowsPendingRestartReasons')
+                    )
+            }
+
+        if ($DriverVerification.DriverChanges) {
+            $DriverChangesSummary = $DriverVerification.DriverChanges
+        }
+
+        if ($DriverVerification.DriverSnapshots) {
+            $DriverSnapshotsSummary = $DriverVerification.DriverSnapshots
+        }
+
+        if ($DriverVerification.OEMTools) {
+            $OEMToolsSummary = @($DriverVerification.OEMTools)
+        }
+    }
+
+    $UpdateSummary =
+        [PSCustomObject]@{
+            StageExitCode =
+                if ($UpdateDriversStage) {
+                    $UpdateDriversStage.ExitCode
+                }
+                else {
+                    $null
+                }
+
+            DurationSeconds =
+                if ($UpdateDriversStage) {
+                    $UpdateDriversStage.DurationSeconds
+                }
+                else {
+                    $null
+                }
+
+            RestartRequested =
+                if ($UpdateDriversStage) {
+                    ($UpdateDriversStage.ExitCode -eq 3010)
+                }
+                else {
+                    $false
+                }
+        }
+
+    $Summary =
+        [PSCustomObject]@{
+            ComputerName = $env:COMPUTERNAME
+            SessionId =
+                if ($script:DeploymentSession) {
+                    $script:DeploymentSession.SessionId
+                }
+                else {
+                    $null
+                }
+            DeploymentCycle =
+                if ($script:DeploymentSession) {
+                    $script:DeploymentSession.Cycle
+                }
+                else {
+                    $null
+                }
+            MaximumDeploymentCycles = $MaximumDeploymentCycles
+            CompletionTime = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+            Status = $OverallStatus
+            RestartRequired = $RestartRequired
+            FailedStage = $FailedStage
+            Stages = $Results
+            Computer = $ComputerSummary
+            UpdateDrivers = $UpdateSummary
+            Verification = $VerificationSummary
+            DriverChanges = $DriverChangesSummary
+            DriverSnapshots = $DriverSnapshotsSummary
+            OEMTools = @($OEMToolsSummary)
+            RestartReasons = @($RestartReasons)
+        }
+
+    $Summary |
+        ConvertTo-Json `
+            -Depth 12 |
+        Set-Content `
+            -LiteralPath $SummaryFile `
+            -Encoding UTF8
+
+    Write-Log -Message (
+        "Deployment summary saved to '$SummaryFile'."
+    )
+
+
+    # ========================================================
+    # CONSOLE SUMMARY
+    # ========================================================
+
+    Write-Host ''
+    Write-Host '============================================================'
+    Write-Host 'Driver Deployment Summary'
+    Write-Host '============================================================'
+    Write-Host ''
+
+
+    foreach (
+        $Result in $Results
+    ) {
+
+        Write-Host (
+            "{0,-30} Exit Code: {1}" -f `
+                $Result.Name,
+                $Result.ExitCode
+        )
+    }
+
+
+    Write-Host ''
+
+    Write-Host (
+        "Status           : $OverallStatus"
+    )
+
+
+    Write-Host (
+        "Restart Required : $RestartRequired"
+    )
+
+
+    if ($FailedStage) {
+
+        Write-Host (
+            "Failed Stage      : $FailedStage"
+        )
+    }
+
+    if ($ComputerSummary) {
+        Write-Host ''
+        Write-Host "Computer         : $($ComputerSummary.ComputerName)"
+        Write-Host "Manufacturer     : $($ComputerSummary.Manufacturer)"
+        Write-Host "Model            : $($ComputerSummary.Model)"
+    }
+
+    if ($VerificationSummary) {
+        Write-Host ''
+        Write-Host 'Verification'
+        Write-Host "Errors Before    : $($VerificationSummary.DeviceErrorsBefore)"
+        Write-Host "Errors After     : $($VerificationSummary.DeviceErrorsAfter)"
+        Write-Host "Fixed            : $($VerificationSummary.FixedDeviceErrors)"
+        Write-Host "Remaining        : $($VerificationSummary.RemainingDeviceErrors)"
+    }
+
+    if ($DriverChangesSummary) {
+        Write-Host ''
+        Write-Host 'Driver Changes'
+        Write-Host "Changed          : $($DriverChangesSummary.ChangedCount)"
+        Write-Host "Added            : $($DriverChangesSummary.AddedCount)"
+        Write-Host "Removed          : $($DriverChangesSummary.RemovedCount)"
+    }
+
+    if ($RestartReasons.Count -gt 0) {
+        Write-Host ''
+        Write-Host 'Restart Reasons'
+
+        foreach ($RestartReason in $RestartReasons) {
+            Write-Host " - $RestartReason"
+        }
+    }
+
+    Write-Host ''
+    Write-Host '============================================================'
+    Write-Host ''
+
+
+    # ========================================================
+    # FINAL EXIT CODE
+    # ========================================================
+
+    if ($DeploymentFailed) {
+
+        $FinalExitCode =
+            1
+    }
+    elseif ($RestartRequired) {
+
+        $FinalExitCode =
+            3010
+    }
+    else {
+
+        $FinalExitCode =
+            0
+    }
+
+
+    # ========================================================
+    # FINAL RESULT
+    # ========================================================
+
+    if ($DeploymentFailed) {
+
+        Write-Log `
+            -Message (
+                "Driver deployment failed during '$FailedStage'."
+            ) `
+            -Level 'ERROR'
+
+
+        Save-DeploymentErrorLog `
+            -FailedStage $FailedStage `
+            -ExitCode $FinalExitCode
+    }
+    elseif (
+        $RestartRequired
+    ) {
+
+        Write-Log `
+            -Message (
+                'Driver deployment completed successfully. ' +
+                'Restart required.'
+            ) `
+            -Level 'WARNING'
+    }
+    else {
+
+        Write-Log -Message (
+            'Driver deployment completed successfully. ' +
+            'No restart required.'
+        )
+    }
+
+
+    # ========================================================
+    # SHOW FINAL INFORMATION BEFORE CLEANUP
+    # ========================================================
+
+    Show-DeploymentFinished `
+        -ExitCode $FinalExitCode `
+        -Status $OverallStatus `
+        -RestartRequired $RestartRequired `
+        -FailedStage $FailedStage
+
+    Show-DriverVerification
+
+
+    # ========================================================
+    # CLEANUP
+    # ========================================================
+    #
+    # Exit 0:
+    #
+    #     Deployment completed.
+    #     Cleanup is allowed.
+    #
+    # Exit 1:
+    #
+    #     Deployment failed.
+    #     Failure information has already been copied to the
+    #     persistent error log.
+    #     Cleanup is allowed.
+    #
+    # Exit 3010:
+    #
+    #     Deployment is not finished yet.
+    #     Windows must restart and this controller must run
+    #     again.
+    #
+    #     Do NOT cleanup.
+    #
+    # ========================================================
+
+    Save-ItinoMachineReadableResult `
+        -ExitCode $FinalExitCode `
+        -Status $OverallStatus
+
+
+    if (
+        $FinalExitCode -eq 3010
+    ) {
+
+        Save-ItinoDeploymentSession `
+            -Status 'RestartRequired'
+
+        Write-Log `
+            -Message (
+                'Restart required. Preserving ITINO state, reports and ' +
+                'the ORIGINAL rollback baseline for the next cycle.'
+            ) `
+            -Level 'WARNING'
+    }
+    elseif (
+        $FinalExitCode -eq 1
+    ) {
+
+        Save-ItinoDeploymentSession `
+            -Status 'Failed'
+
+        if ($PreserveArtifactsOnFailure) {
+            Write-Log `
+                -Message (
+                    'Deployment failed. Preserving complete ITINO ' +
+                    'diagnostics and rollback data.'
+                ) `
+                -Level 'WARNING'
+        }
+        else {
+            Invoke-FinalCleanup
+        }
+    }
+    else {
+
+        Save-ItinoDeploymentSession `
+            -Status 'Success'
+
+        Remove-EntireItinoRoot
+    }
+
+
+    # ========================================================
+    # RETURN RESULT TO PARENT DEPLOYMENT
+    # ========================================================
+
+    Write-Host ''
+
+    Write-Host (
+        "Driver deployment controller exit code: $FinalExitCode"
+    )
+
+
+    Exit-ItinoDeploymentMutex
+
+
+    exit $FinalExitCode
+}
+catch {
+
+    $ErrorMessage =
+        $_.Exception.Message
+
+
+    $DeploymentFailed =
+        $true
+
+
+    if (
+        [string]::IsNullOrWhiteSpace(
+            $FailedStage
+        )
+    ) {
+
+        $FailedStage =
+            'Driver Deployment Controller'
+    }
+
+
+    try {
+
+        Write-Log `
+            -Message (
+                "Unhandled deployment error: $ErrorMessage"
+            ) `
+            -Level 'ERROR'
+
+
+        if (
+            $_.InvocationInfo.ScriptLineNumber
+        ) {
+
+            Write-Log `
+                -Message (
+                    "Failure line: $($_.InvocationInfo.ScriptLineNumber)"
+                ) `
+                -Level 'ERROR'
+        }
+    }
+    catch {
+
+        Write-Host (
+            "ERROR: $ErrorMessage"
+        )
+    }
+
+
+    # ========================================================
+    # PRESERVE FAILURE INFORMATION
+    # ========================================================
+
+    Save-DeploymentErrorLog `
+        -FailedStage $FailedStage `
+        -ExitCode 1
+
+
+    # ========================================================
+    # CLEANUP TEMPORARY WORKING FILES
+    # ========================================================
+    #
+    # Failure is final for this controller invocation.
+    #
+    # DriverDeployment-Error.log is outside $BasePath, so it
+    # survives this cleanup.
+    #
+    # ========================================================
+
+
+    try {
+        Save-ItinoMachineReadableResult `
+            -ExitCode 1 `
+            -Status 'Failed'
+
+        Save-ItinoDeploymentSession `
+            -Status 'Failed'
+    }
+    catch {
+    }
+
+
+    if (-not $PreserveArtifactsOnFailure) {
+        Invoke-FinalCleanup
+    }
+    else {
+        Write-Host ''
+        Write-Host (
+            'Failure artifacts preserved under C:\ProgramData\Itino.'
+        )
+    }
+
+
+    Exit-ItinoDeploymentMutex
+
+
+    # ========================================================
+    # RETURN FAILURE
+    # ========================================================
+
+    exit 1
+}
