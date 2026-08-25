@@ -153,7 +153,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.3.8'
+    '1.3.9'
 
 $ScriptUpdated =
     '2026-08-25'
@@ -1411,6 +1411,91 @@ function Request-WindowsUpdateScan {
 
 
 # ============================================================
+# WINDOWS UPDATE FIRMWARE CLASSIFICATION
+# ============================================================
+
+function Test-ItinoWindowsUpdateFirmware {
+
+    param(
+        [Parameter(Mandatory)]
+        $Update
+    )
+
+
+    $Title =
+        [string]$Update.Title
+
+
+    if (
+        $Title -match '(?i)\bfirmware\b' -or
+        $Title -match '(?i)\bBIOS\b' -or
+        $Title -match '(?i)\bUEFI\b'
+    ) {
+
+        return $true
+    }
+
+
+    try {
+
+        for (
+            $CategoryIndex = 0;
+            $CategoryIndex -lt $Update.Categories.Count;
+            $CategoryIndex++
+        ) {
+
+            $Category =
+                $Update.Categories.Item(
+                    $CategoryIndex
+                )
+
+
+            $CategoryName =
+                [string]$Category.Name
+
+
+            if (
+                $CategoryName -match '(?i)\bfirmware\b' -or
+                $CategoryName -match '(?i)\bBIOS\b' -or
+                $CategoryName -match '(?i)\bUEFI\b'
+            ) {
+
+                return $true
+            }
+        }
+    }
+    catch {
+
+        # Title-based detection above still protects known
+        # Firmware / BIOS / UEFI update naming.
+    }
+
+
+    return $false
+}
+
+
+function Test-ItinoWindowsUpdateAllowed {
+
+    param(
+        [Parameter(Mandatory)]
+        $Update
+    )
+
+
+    if ($AllowFirmwareUpdates) {
+        return $true
+    }
+
+
+    return -not (
+        Test-ItinoWindowsUpdateFirmware `
+            -Update $Update
+    )
+}
+
+
+# ============================================================
 # WINDOWS UPDATE FINAL CONFIRMATION
 # ============================================================
 
@@ -1460,7 +1545,42 @@ function Get-PendingWindowsUpdateDriverCount {
             )
 
 
-        return [int]$SearchResult.Updates.Count
+        $EligibleCount =
+            0
+
+
+        for (
+            $Index = 0;
+            $Index -lt $SearchResult.Updates.Count;
+            $Index++
+        ) {
+
+            $PendingUpdate =
+                $SearchResult.Updates.Item(
+                    $Index
+                )
+
+
+            if (
+                Test-ItinoWindowsUpdateAllowed `
+                    -Update $PendingUpdate
+            ) {
+
+                $EligibleCount++
+            }
+            else {
+
+                Write-Log `
+                    -Message (
+                        '[FIRMWARE-SAFETY] Ignoring pending Windows Update ' +
+                        "firmware item during final confirmation: $($PendingUpdate.Title)"
+                    ) `
+                    -Level 'WARNING'
+            }
+        }
+
+
+        return [int]$EligibleCount
     }
     finally {
 
@@ -2104,6 +2224,25 @@ function Invoke-WindowsUpdateDriverUpdate {
                     )
 
 
+                    if (
+                        -not (
+                            Test-ItinoWindowsUpdateAllowed `
+                                -Update $Update
+                        )
+                    ) {
+
+                        Write-Log `
+                            -Message (
+                                '[FIRMWARE-SAFETY] Skipping Windows Update ' +
+                                "firmware/BIOS item because controller power " +
+                                "safety requirements were not met: $($Update.Title)"
+                            ) `
+                            -Level 'WARNING'
+
+                        continue
+                    }
+
+
                     if (-not $Update.EulaAccepted) {
 
                         try {
@@ -2143,6 +2282,31 @@ function Invoke-WindowsUpdateDriverUpdate {
                             $Update
                         )
                     }
+                }
+
+
+                # ============================================
+                # STOP IF ONLY BLOCKED FIRMWARE WAS FOUND
+                # ============================================
+
+                if (
+                    $UpdatesToDownload.Count -eq 0 -and
+                    $UpdatesToInstall.Count -eq 0
+                ) {
+
+                    Write-Log -Message (
+                        "$PhaseName pass ${Pass}: No eligible driver updates remain " +
+                        'after firmware safety filtering.'
+                    )
+
+
+                    Write-Log -Message (
+                        "$PhaseName processing complete. " +
+                        "Total installed: $TotalInstalled."
+                    )
+
+
+                    return
                 }
 
 

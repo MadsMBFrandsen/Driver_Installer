@@ -119,6 +119,12 @@ $DeploymentCycle =
     )
 
 
+$DeploymentSessionId =
+    [Environment]::GetEnvironmentVariable(
+        'ITINO_DEPLOYMENT_SESSION_ID'
+    )
+
+
 # ============================================================
 # PATHS
 # ============================================================
@@ -150,6 +156,12 @@ $DriverSnapshotBeforeFile =
     Join-Path `
         $BasePath `
         'DriverSnapshot-Before.json'
+
+
+$DriverSnapshotSessionFile =
+    Join-Path `
+        $BasePath `
+        'DriverSnapshot-Before.SessionId.txt'
 
 
 
@@ -638,9 +650,41 @@ try {
     # PHASE 9.2 - ORIGINAL DRIVER BASELINE
     # ========================================================
 
+    $StoredSnapshotSessionId =
+        $null
+
+
+    if (
+        Test-Path -LiteralPath $DriverSnapshotSessionFile
+    ) {
+
+        try {
+
+            $StoredSnapshotSessionId =
+                (
+                    Get-Content `
+                        -LiteralPath $DriverSnapshotSessionFile `
+                        -Raw `
+                        -ErrorAction Stop
+                ).Trim()
+        }
+        catch {
+
+            $StoredSnapshotSessionId =
+                $null
+        }
+    }
+
+
     $ReuseOriginalSnapshot =
         (
             $PreserveInitialDriverBaseline -and
+            ([int]$DeploymentCycle -gt 1) -and
+            -not [string]::IsNullOrWhiteSpace(
+                [string]$DeploymentSessionId
+            ) -and
+            [string]$StoredSnapshotSessionId -eq
+                [string]$DeploymentSessionId -and
             (Test-Path -LiteralPath $DriverSnapshotBeforeFile)
         )
 
@@ -727,8 +771,19 @@ try {
             -LiteralPath $DriverSnapshotBeforeFile `
             -Encoding UTF8
 
+        Set-Content `
+            -LiteralPath $DriverSnapshotSessionFile `
+            -Value $DeploymentSessionId `
+            -Encoding UTF8
+
+
         Write-Log -Message (
             "Original driver snapshot saved to '$DriverSnapshotBeforeFile'."
+        )
+
+
+        Write-Log -Message (
+            "Original driver snapshot bound to deployment session '$DeploymentSessionId'."
         )
     }
 
@@ -764,6 +819,10 @@ try {
 
     if (
         $PreserveInitialDriverBaseline -and
+        ([int]$DeploymentCycle -gt 1) -and
+        -not [string]::IsNullOrWhiteSpace(
+            [string]$DeploymentSessionId
+        ) -and
         (Test-Path -LiteralPath $LatestPointerFile)
     ) {
 
@@ -782,12 +841,39 @@ try {
                     $ExistingRollbackPath `
                     'RollbackManifest.json'
 
+
+            $ExistingRollbackSessionFile =
+                Join-Path `
+                    $ExistingRollbackPath `
+                    'DeploymentSessionId.txt'
+
+
+            $ExistingRollbackSessionId =
+                $null
+
+
+            if (
+                Test-Path -LiteralPath $ExistingRollbackSessionFile
+            ) {
+
+                $ExistingRollbackSessionId =
+                    (
+                        Get-Content `
+                            -LiteralPath $ExistingRollbackSessionFile `
+                            -Raw `
+                            -ErrorAction Stop
+                    ).Trim()
+            }
+
+
             if (
                 -not [string]::IsNullOrWhiteSpace(
                     $ExistingRollbackPath
                 ) -and
                 (Test-Path -LiteralPath $ExistingRollbackPath) -and
-                (Test-Path -LiteralPath $ExistingRollbackManifest)
+                (Test-Path -LiteralPath $ExistingRollbackManifest) -and
+                [string]$ExistingRollbackSessionId -eq
+                    [string]$DeploymentSessionId
             ) {
 
                 $DriverRollbackBackupPath =
@@ -1147,8 +1233,25 @@ try {
         )
 
 
+        $RollbackSessionFile =
+            Join-Path `
+                $DriverRollbackBackupPath `
+                'DeploymentSessionId.txt'
+
+
+        Set-Content `
+            -LiteralPath $RollbackSessionFile `
+            -Value $DeploymentSessionId `
+            -Encoding UTF8
+
+
         Write-Log -Message (
             "Rollback manifest saved to '$RollbackManifestFile'."
+        )
+
+
+        Write-Log -Message (
+            "Rollback archive bound to deployment session '$DeploymentSessionId'."
         )
 
 
