@@ -1,5 +1,19 @@
 ﻿#requires -version 5.1
 
+# ============================================================
+# PARAMETERS
+# ============================================================
+#
+# IMPORTANT:
+# In Windows PowerShell, the param() block must appear before
+# executable statements such as variable assignments.
+# ============================================================
+
+param(
+    [switch]$ResumeFromTask
+)
+
+
 <#
 .SYNOPSIS
     ITINO driver deployment launcher with optional reboot resume.
@@ -12,6 +26,10 @@
     When the wrapper is started by that task after a reboot, the task is
     deleted before the next deployment cycle starts. If that cycle again
     returns 3010, a fresh task is created for the next reboot.
+
+
+    Compatible with Windows PowerShell 5.1. The param() block is placed
+    before all executable configuration statements.
 
     Exit code handling:
         0    = Final success. Resume task is removed.
@@ -76,15 +94,6 @@ $ResumeTaskName =
 # Main deployment controller. Expected beside this wrapper.
 $ControllerFileName =
     'Run-DriverDeployment.ps1'
-
-
-# ============================================================
-# PARAMETERS
-# ============================================================
-
-param(
-    [switch]$ResumeFromTask
-)
 
 
 # ============================================================
