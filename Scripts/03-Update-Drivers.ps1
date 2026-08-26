@@ -60,6 +60,15 @@ $ScriptName =
 # ============================================================
 
 # ------------------------------------------------------------
+# Title   : OEM-Specific Startup Logging
+# Version : 1.4.0
+# Reason  : Generic firmware safety status is shown on all OEMs.
+#           Lenovo-only options are logged only on Lenovo PCs.
+# Date    : 2026-08-26
+# ------------------------------------------------------------
+
+
+# ------------------------------------------------------------
 # Title   : Deployment Sequence Firmware Safety
 # Version : 1.3.8
 # Reason  : Adds controller-driven BIOS/Firmware power safety.
@@ -153,10 +162,10 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.3.9'
+    '1.4.0'
 
 $ScriptUpdated =
-    '2026-08-25'
+    '2026-08-26'
 
 
 
@@ -6364,11 +6373,6 @@ try {
 
 
     Write-Log -Message (
-        "Close Lenovo Hotkey popup: $CloseLenovoHotkeyPopup"
-    )
-
-
-    Write-Log -Message (
         "Force Windows Update: $ForceWindowsUpdate"
     )
 
@@ -6394,31 +6398,7 @@ try {
 
 
     Write-Log -Message (
-        "Lenovo LSUClient module: $LenovoLSUClientModuleName"
-    )
-
-
-    Write-Log -Message (
-        "Lenovo LSUClient repository: $LenovoLSUClientRepository"
-    )
-
-
-    Write-Log -Message (
-        "Lenovo maximum LSUClient rounds: $MaximumLenovoLSURounds"
-    )
-
-
-    Write-Log -Message (
-        "Lenovo LSUClient update types: $($LenovoLSUUpdateTypes -join ',')"
-    )
-
-
-    Write-Log -Message (
-        "Lenovo LSUClient severities: $($LenovoLSUSeverities -join ',')"
-    )
-
-    Write-Log -Message (
-        "Lenovo BIOS/Firmware allowed by controller safety gate: $AllowFirmwareUpdates"
+        "BIOS/Firmware allowed by controller safety gate: $AllowFirmwareUpdates"
     )
 
 
@@ -6511,6 +6491,36 @@ try {
     Write-Log -Message (
         "Model: $Model"
     )
+
+
+    if (
+        $Manufacturer -match 'LENOVO'
+    ) {
+
+        Write-Log -Message (
+            "Close Lenovo Hotkey popup: $CloseLenovoHotkeyPopup"
+        )
+
+        Write-Log -Message (
+            "Lenovo LSUClient module: $LenovoLSUClientModuleName"
+        )
+
+        Write-Log -Message (
+            "Lenovo LSUClient repository: $LenovoLSUClientRepository"
+        )
+
+        Write-Log -Message (
+            "Lenovo maximum LSUClient rounds: $MaximumLenovoLSURounds"
+        )
+
+        Write-Log -Message (
+            "Lenovo LSUClient update types: $($LenovoLSUUpdateTypes -join ',')"
+        )
+
+        Write-Log -Message (
+            "Lenovo LSUClient severities: $($LenovoLSUSeverities -join ',')"
+        )
+    }
 
 
     # ========================================================

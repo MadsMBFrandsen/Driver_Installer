@@ -179,6 +179,20 @@ $AllowWindowsUpdateFallback =
     $true
 
 
+# HP Image Assistant SoftPaq extraction must never be able to
+# hold the full deployment sequence indefinitely.
+#
+# If extraction times out or fails, script 02 throws into its
+# existing OEM fallback handler. Because Windows Update fallback
+# is enabled, the deployment continues to script 03.
+
+$HPImageAssistantExtractionTimeoutSeconds =
+    120
+
+$HPImageAssistantExecutableWaitSeconds =
+    30
+
+
 # ========================================================================
 # PATHS
 # ========================================================================
@@ -2178,11 +2192,26 @@ function Install-HPImageAssistant {
         "Extracting HP Image Assistant to '$ExtractionPath'."
     )
 
+    Write-Log -Message (
+        "HP Image Assistant extraction timeout: " +
+        "$HPImageAssistantExtractionTimeoutSeconds seconds."
+    )
+
+    # HP SoftPaq extraction syntax:
+    #
+    #   /s = silent
+    #   /e = extract
+    #   /f = extraction folder
+    #
+    # Using /f as a separate switch/value is more compatible with
+    # HP SoftPaq wrappers than the previous /e="<path>" form.
 
     $Arguments =
         @(
-            '/s',
-            "/e=`"$ExtractionPath`""
+            '/s'
+            '/e'
+            '/f'
+            "`"$ExtractionPath`""
         )
 
 
@@ -2190,18 +2219,85 @@ function Install-HPImageAssistant {
         Start-Process `
             -FilePath $Installer `
             -ArgumentList $Arguments `
-            -Wait `
             -PassThru `
             -NoNewWindow
 
 
-    Write-Log -Message (
-        "HP Image Assistant extractor exit code: $($Process.ExitCode)"
-    )
+    $CompletedInTime =
+        $Process.WaitForExit(
+            $HPImageAssistantExtractionTimeoutSeconds * 1000
+        )
+
+
+    if (-not $CompletedInTime) {
+
+        Write-Log `
+            -Message (
+                'HP Image Assistant extractor exceeded the configured ' +
+                "$HPImageAssistantExtractionTimeoutSeconds second timeout. " +
+                'Stopping the extractor so deployment can continue.'
+            ) `
+            -Level 'WARNING'
+
+
+        try {
+
+            if (-not $Process.HasExited) {
+
+                $Process.Kill()
+                $Process.WaitForExit()
+            }
+        }
+        catch {
+
+            Write-Log `
+                -Message (
+                    'Unable to stop timed-out HP Image Assistant extractor. ' +
+                    "Reason: $($_.Exception.Message)"
+                ) `
+                -Level 'WARNING'
+        }
+    }
+
+
+    $ExtractorExitCode =
+        $null
+
+
+    if ($Process.HasExited) {
+
+        try {
+
+            $ExtractorExitCode =
+                [int]$Process.ExitCode
+        }
+        catch {
+
+            $ExtractorExitCode =
+                $null
+        }
+    }
+
+
+    if ($null -ne $ExtractorExitCode) {
+
+        Write-Log -Message (
+            "HP Image Assistant extractor exit code: $ExtractorExitCode"
+        )
+    }
+    else {
+
+        Write-Log `
+            -Message (
+                'HP Image Assistant extractor exit code is unavailable ' +
+                'because the process did not complete normally.'
+            ) `
+            -Level 'WARNING'
+    }
 
 
     if (
-        $Process.ExitCode -eq 3010
+        $ExtractorExitCode -eq 3010
     ) {
 
         Set-RestartRequired `
@@ -2211,39 +2307,112 @@ function Install-HPImageAssistant {
     }
 
 
-    if (
-        $Process.ExitCode -notin @(
-            0,
-            3010
-        )
-    ) {
+    # Do not trust the process exit code alone. Some SoftPaq wrappers
+    # can return an unusual code even though extraction has completed.
+    # Give the expected executable a short, bounded discovery window.
 
-        throw (
-            'HP Image Assistant extraction failed. ' +
-            "Exit code: $($Process.ExitCode)"
-        )
-    }
+    Write-Log -Message (
+        'Waiting up to ' +
+        "$HPImageAssistantExecutableWaitSeconds seconds for " +
+        'HPImageAssistant.exe to become available.'
+    )
 
 
     $HPIAExecutable =
-        Get-ChildItem `
-            -Path $ExtractionPath `
-            -Filter 'HPImageAssistant.exe' `
-            -File `
-            -Recurse `
-            -ErrorAction SilentlyContinue |
-        Select-Object `
-            -First 1 `
-            -ExpandProperty FullName
+        $null
 
 
-    if (
-        -not $HPIAExecutable
-    ) {
+    $ExecutableDeadline =
+        (Get-Date).AddSeconds(
+            $HPImageAssistantExecutableWaitSeconds
+        )
+
+
+    do {
+
+        $HPIAExecutable =
+            Get-ChildItem `
+                -Path $ExtractionPath `
+                -Filter 'HPImageAssistant.exe' `
+                -File `
+                -Recurse `
+                -ErrorAction SilentlyContinue |
+            Select-Object `
+                -First 1 `
+                -ExpandProperty FullName
+
+
+        if ($HPIAExecutable) {
+            break
+        }
+
+
+        if ((Get-Date) -lt $ExecutableDeadline) {
+
+            Start-Sleep -Seconds 2
+        }
+
+    } while (
+        (Get-Date) -lt $ExecutableDeadline
+    )
+
+
+    if ($HPIAExecutable) {
+
+        if (
+            -not $CompletedInTime -or
+            (
+                $null -ne $ExtractorExitCode -and
+                $ExtractorExitCode -notin @(
+                    0,
+                    3010
+                )
+            )
+        ) {
+
+            Write-Log `
+                -Message (
+                    'HPImageAssistant.exe was found despite the extractor ' +
+                    'timeout/non-standard exit result. Continuing with the ' +
+                    'validated extracted utility.'
+                ) `
+                -Level 'WARNING'
+        }
+    }
+    else {
+
+        if (-not $CompletedInTime) {
+
+            throw (
+                'HP Image Assistant extraction timed out and ' +
+                'HPImageAssistant.exe was not found. Windows Update ' +
+                'fallback can continue the deployment.'
+            )
+        }
+
+
+        if (
+            $null -ne $ExtractorExitCode -and
+            $ExtractorExitCode -notin @(
+                0,
+                3010
+            )
+        ) {
+
+            throw (
+                'HP Image Assistant extraction failed. ' +
+                "Exit code: $ExtractorExitCode. " +
+                'HPImageAssistant.exe was not found. Windows Update ' +
+                'fallback can continue the deployment.'
+            )
+        }
+
 
         throw (
             'HP Image Assistant extraction completed, but ' +
-            'HPImageAssistant.exe could not be found.'
+            'HPImageAssistant.exe could not be found within the ' +
+            "$HPImageAssistantExecutableWaitSeconds second discovery window. " +
+            'Windows Update fallback can continue the deployment.'
         )
     }
 
@@ -2920,6 +3089,14 @@ try {
 
     Write-Log -Message (
         "Windows Update fallback allowed: $AllowWindowsUpdateFallback"
+    )
+
+    Write-Log -Message (
+        "HP Image Assistant extraction timeout: $HPImageAssistantExtractionTimeoutSeconds seconds"
+    )
+
+    Write-Log -Message (
+        "HP Image Assistant executable wait: $HPImageAssistantExecutableWaitSeconds seconds"
     )
 
 
