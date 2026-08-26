@@ -1,0 +1,576 @@
+﻿#requires -version 5.1
+
+<#
+.SYNOPSIS
+    ITINO driver deployment launcher with optional reboot resume.
+
+.DESCRIPTION
+    Runs Run-DriverDeployment.ps1 and creates a temporary Scheduled Task ONLY
+    when the controller returns exit code 3010, so deployment can continue
+    after Windows restarts.
+
+    When the wrapper is started by that task after a reboot, the task is
+    deleted before the next deployment cycle starts. If that cycle again
+    returns 3010, a fresh task is created for the next reboot.
+
+    Exit code handling:
+        0    = Final success. Resume task is removed.
+        1    = Failure. Resume task is removed.
+        1618 = Another ITINO deployment is already running.
+               Resume task is kept because the active deployment still owns it.
+        3010 = Success, restart required.
+               Resume task is kept.
+               If automatic restart is enabled, Windows is restarted.
+
+    The task runs as SYSTEM at startup with highest privileges.
+
+    IMPORTANT:
+    Keep this file and Run-DriverDeployment.ps1 in the same folder.
+#>
+
+
+# ============================================================
+# OPTIONS
+# ============================================================
+
+# Create a temporary startup task that resumes this deployment
+# after Windows restarts.
+$EnableResumeAfterRestart =
+    $true
+
+
+# Automatically restart Windows when Run-DriverDeployment.ps1
+# returns exit code 3010.
+#
+# $true:
+#   Controller returns 3010
+#       -> task remains registered
+#       -> PC automatically restarts
+#       -> task starts this wrapper after boot
+#
+# $false:
+#   Controller returns 3010
+#       -> task remains registered
+#       -> PC is NOT restarted automatically
+#       -> deployment resumes after the next manual restart
+$AutomaticallyRestartOn3010 =
+    $true
+
+
+# Delay before automatic reboot after exit code 3010.
+$RestartDelaySeconds =
+    30
+
+
+# Delay after Windows startup before the scheduled task runs.
+# This gives networking and Windows services time to initialize.
+$ResumeDelayAfterStartupSeconds =
+    60
+
+
+# Name of the temporary Windows Scheduled Task.
+$ResumeTaskName =
+    'ITINO Driver Deployment Resume'
+
+
+# Main deployment controller. Expected beside this wrapper.
+$ControllerFileName =
+    'Run-DriverDeployment.ps1'
+
+
+# ============================================================
+# PARAMETERS
+# ============================================================
+
+param(
+    [switch]$ResumeFromTask
+)
+
+
+# ============================================================
+# PATHS
+# ============================================================
+
+$WrapperPath =
+    $PSCommandPath
+
+
+$WrapperDirectory =
+    Split-Path `
+        -Parent `
+        $WrapperPath
+
+
+$ControllerPath =
+    Join-Path `
+        $WrapperDirectory `
+        $ControllerFileName
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+function Test-IsAdministrator {
+
+    try {
+
+        $Identity =
+            [Security.Principal.WindowsIdentity]::GetCurrent()
+
+
+        $Principal =
+            New-Object `
+                Security.Principal.WindowsPrincipal(
+                    $Identity
+                )
+
+
+        return $Principal.IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator
+        )
+    }
+    catch {
+
+        return $false
+    }
+}
+
+
+function Remove-ItinoResumeTask {
+
+    try {
+
+        $ExistingTask =
+            Get-ScheduledTask `
+                -TaskName $ResumeTaskName `
+                -ErrorAction SilentlyContinue
+
+
+        if ($ExistingTask) {
+
+            Unregister-ScheduledTask `
+                -TaskName $ResumeTaskName `
+                -Confirm:$false `
+                -ErrorAction Stop
+
+
+            Write-Host (
+                "Removed temporary resume task: $ResumeTaskName"
+            )
+        }
+    }
+    catch {
+
+        Write-Host (
+            'WARNING: Unable to remove temporary resume task. ' +
+            "Reason: $($_.Exception.Message)"
+        )
+    }
+}
+
+
+function Register-ItinoResumeTask {
+
+    if (-not $EnableResumeAfterRestart) {
+        return
+    }
+
+
+    if (-not (
+        Test-Path -LiteralPath $WrapperPath
+    )) {
+
+        throw (
+            "Resume wrapper was not found: $WrapperPath"
+        )
+    }
+
+
+    $PowerShellExe =
+        Join-Path `
+            $PSHOME `
+            'powershell.exe'
+
+
+    $Arguments =
+        (
+            '-NoLogo -NoProfile -ExecutionPolicy Bypass ' +
+            '-File "' +
+            $WrapperPath +
+            '" -ResumeFromTask'
+        )
+
+
+    $Action =
+        New-ScheduledTaskAction `
+            -Execute $PowerShellExe `
+            -Argument $Arguments
+
+
+    $Trigger =
+        New-ScheduledTaskTrigger `
+            -AtStartup
+
+
+    try {
+
+        $Trigger.Delay =
+            'PT' +
+            [int]$ResumeDelayAfterStartupSeconds +
+            'S'
+    }
+    catch {
+
+        Write-Host (
+            'WARNING: Unable to set startup task delay. ' +
+            'The task will run immediately after startup.'
+        )
+    }
+
+
+    $Principal =
+        New-ScheduledTaskPrincipal `
+            -UserId 'SYSTEM' `
+            -LogonType ServiceAccount `
+            -RunLevel Highest
+
+
+    $Settings =
+        New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries `
+            -StartWhenAvailable `
+            -MultipleInstances IgnoreNew
+
+
+    $Task =
+        New-ScheduledTask `
+            -Action $Action `
+            -Trigger $Trigger `
+            -Principal $Principal `
+            -Settings $Settings
+
+
+    Register-ScheduledTask `
+        -TaskName $ResumeTaskName `
+        -InputObject $Task `
+        -Force `
+        -ErrorAction Stop |
+    Out-Null
+
+
+    Write-Host (
+        "Resume task ready: $ResumeTaskName"
+    )
+
+    Write-Host (
+        "Resume delay after startup: $ResumeDelayAfterStartupSeconds seconds"
+    )
+}
+
+
+function Invoke-ItinoAutomaticRestart {
+
+    Write-Host ''
+    Write-Host '============================================================'
+    Write-Host 'RESTART REQUIRED'
+    Write-Host '============================================================'
+    Write-Host ''
+    Write-Host (
+        "Automatic restart enabled. Restarting in $RestartDelaySeconds seconds."
+    )
+
+    Write-Host (
+        'The temporary resume task will continue the driver deployment after startup.'
+    )
+    Write-Host ''
+
+
+    # shutdown.exe is used instead of Restart-Computer so the
+    # command can include a visible delay and reason.
+    & "$env:SystemRoot\System32\shutdown.exe" `
+        /r `
+        /t $RestartDelaySeconds `
+        /f `
+        /d p:2:4 `
+        /c "ITINO driver deployment requires a restart."
+
+
+    $ShutdownExitCode =
+        $LASTEXITCODE
+
+
+    if ($ShutdownExitCode -ne 0) {
+
+        throw (
+            "Unable to schedule Windows restart. shutdown.exe exit code: $ShutdownExitCode"
+        )
+    }
+}
+
+
+# ============================================================
+# START
+# ============================================================
+
+Write-Host ''
+Write-Host '============================================================'
+Write-Host 'ITINO Driver Deployment Auto Resume'
+Write-Host '============================================================'
+Write-Host ''
+
+Write-Host (
+    "Resume after restart : $EnableResumeAfterRestart"
+)
+
+Write-Host (
+    "Automatic restart    : $AutomaticallyRestartOn3010"
+)
+
+Write-Host (
+    "Controller           : $ControllerPath"
+)
+
+Write-Host (
+    "Started from task    : $ResumeFromTask"
+)
+
+Write-Host ''
+
+
+# ============================================================
+# REQUIRE ADMINISTRATOR
+# ============================================================
+
+if (-not (
+    Test-IsAdministrator
+)) {
+
+    Write-Host 'ERROR: Administrator rights are required.'
+    exit 1
+}
+
+
+# ============================================================
+# VALIDATE CONTROLLER
+# ============================================================
+
+if (-not (
+    Test-Path -LiteralPath $ControllerPath
+)) {
+
+    Write-Host (
+        "ERROR: Controller was not found: $ControllerPath"
+    )
+
+    Remove-ItinoResumeTask
+
+    exit 1
+}
+
+
+# ============================================================
+# RESUME TASK CREATION POLICY
+# ============================================================
+#
+# IMPORTANT:
+# The resume task is NOT created before the deployment starts.
+#
+# It is created ONLY when Run-DriverDeployment.ps1 returns 3010.
+#
+# This means:
+#   Exit 0    -> no task is created
+#   Exit 1    -> no task is created
+#   Exit 1618 -> no task is created/changed
+#   Exit 3010 -> create/refresh resume task
+#
+# ============================================================
+
+
+# ============================================================
+# STARTED BY RESUME TASK
+# ============================================================
+#
+# If Windows has restarted and this wrapper was launched by the
+# temporary startup task, remove that task immediately.
+#
+# If the next deployment cycle returns 3010, the task will be
+# created again before the next reboot.
+# ============================================================
+
+if ($ResumeFromTask) {
+
+    Write-Host (
+        'Deployment resumed after restart. Removing the temporary startup task.'
+    )
+
+    Remove-ItinoResumeTask
+}
+
+
+# ============================================================
+# RUN DRIVER DEPLOYMENT CONTROLLER
+# ============================================================
+
+Write-Host ''
+Write-Host '============================================================'
+Write-Host 'STARTING DRIVER DEPLOYMENT CONTROLLER'
+Write-Host '============================================================'
+Write-Host ''
+
+
+& "$PSHOME\powershell.exe" `
+    -NoLogo `
+    -NoProfile `
+    -ExecutionPolicy Bypass `
+    -File $ControllerPath
+
+
+$ControllerExitCode =
+    [int]$LASTEXITCODE
+
+
+Write-Host ''
+Write-Host '============================================================'
+Write-Host 'DRIVER DEPLOYMENT CONTROLLER FINISHED'
+Write-Host '============================================================'
+Write-Host ''
+
+Write-Host (
+    "Controller Exit Code: $ControllerExitCode"
+)
+
+Write-Host ''
+
+
+# ============================================================
+# HANDLE CONTROLLER RESULT
+# ============================================================
+
+switch ($ControllerExitCode) {
+
+    0 {
+
+        # Final clean success.
+        # Run-DriverDeployment.ps1 may already have removed
+        # C:\ProgramData\Itino. The Scheduled Task is separate
+        # and must be removed here.
+
+        Remove-ItinoResumeTask
+
+        Write-Host (
+            'Driver deployment completed successfully.'
+        )
+
+        exit 0
+    }
+
+
+    3010 {
+
+        if (-not $EnableResumeAfterRestart) {
+
+            Write-Host (
+                'Restart required, but automatic resume is disabled.'
+            )
+
+            exit 3010
+        }
+
+
+        # ----------------------------------------------------
+        # CREATE RESUME TASK ONLY AFTER EXIT CODE 3010
+        # ----------------------------------------------------
+
+        try {
+
+            Register-ItinoResumeTask
+        }
+        catch {
+
+            Write-Host (
+                'ERROR: Driver deployment requires a restart, but the ' +
+                'resume task could not be created. ' +
+                "Reason: $($_.Exception.Message)"
+            )
+
+            Write-Host (
+                'Automatic reboot will NOT be started because the ' +
+                'deployment would not be able to resume safely.'
+            )
+
+            exit 3010
+        }
+
+
+        Write-Host (
+            'Restart required. Resume task was created successfully.'
+        )
+
+
+        if ($AutomaticallyRestartOn3010) {
+
+            try {
+
+                Invoke-ItinoAutomaticRestart
+            }
+            catch {
+
+                Write-Host (
+                    'ERROR: Automatic restart failed. ' +
+                    "Reason: $($_.Exception.Message)"
+                )
+
+                Write-Host (
+                    'The resume task is registered. A manual restart will continue the deployment.'
+                )
+
+                exit 3010
+            }
+        }
+        else {
+
+            Write-Host (
+                'Automatic restart is disabled. Restart Windows manually to continue.'
+            )
+        }
+
+
+        exit 3010
+    }
+
+
+    1618 {
+
+        # Another controller process owns the deployment.
+        # Do not create, remove or change the resume task here.
+
+        Write-Host (
+            'Another ITINO driver deployment is already running.'
+        )
+
+        Write-Host (
+            'No resume task was created or changed by this launcher instance.'
+        )
+
+        exit 1618
+    }
+
+
+    default {
+
+        # Actual failure. Do not create a reboot loop.
+        Remove-ItinoResumeTask
+
+        Write-Host (
+            "Driver deployment failed with exit code $ControllerExitCode."
+        )
+
+        Write-Host (
+            'Automatic restart/resume has been disabled for this failed deployment.'
+        )
+
+        exit $ControllerExitCode
+    }
+}
