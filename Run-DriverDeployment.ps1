@@ -63,11 +63,11 @@ $ScriptName =
 # ============================================================
 
 # ------------------------------------------------------------
-# Title   : Complete Cycle Console Capture
-# Version : 1.1.3
-# Reason  : Prevents console-log overwrite across 3010 cycles
-#           and routes controller Write-Host output through the
-#           same persistent console capture as child scripts.
+# Title   : Safe Native Console Transcript
+# Version : 1.1.4
+# Reason  : Uses Start-Transcript instead of the Phase 9.3
+#           custom Write-Host wrapper. Keeps separate console
+#           logs per restart cycle without changing startup.
 # Date    : 2026-08-26
 # ------------------------------------------------------------
 
@@ -95,7 +95,7 @@ $ScriptName =
 # ------------------------------------------------------------
 
 $ScriptVersion =
-    '1.1.3'
+    '1.1.4'
 
 $ScriptUpdated =
     '2026-08-25'
@@ -143,8 +143,8 @@ $WriteLogFiles =
     $false
 
 
-# Save the complete captured console stream from the controller
-# and all child scripts.
+# Save a complete native PowerShell transcript for each
+# deployment cycle.
 #
 # Testing:
 #     $true
@@ -152,12 +152,13 @@ $WriteLogFiles =
 # Production:
 #     $false
 #
-# File:
-#     C:\ProgramData\Itino\DriverDeployment\ConsoleOutput-CycleN.log
+# Files:
+#   C:\ProgramData\Itino\DriverDeployment\ConsoleOutput-Cycle1.log
+#   C:\ProgramData\Itino\DriverDeployment\ConsoleOutput-Cycle2.log
 #
-# The file survives exit 3010 and exit 1 while ITINO data is
-# preserved. On final clean exit 0 it is deleted together with
-# the complete C:\ProgramData\Itino folder.
+# The transcript survives exit 3010 and exit 1.
+# On final exit 0 the transcript is stopped before the complete
+# C:\ProgramData\Itino folder is deleted.
 
 $SaveFullConsoleOutput =
     $true
@@ -519,9 +520,11 @@ $MainLogFile =
 $ConsoleOutputFile =
     $null
 
-
 $ConsoleOutputCycle =
     1
+
+$script:ConsoleTranscriptStarted =
+    $false
 
 
 $RestartFile =
@@ -668,32 +671,19 @@ if ($WriteLogFiles) {
 
 
 # ============================================================
-# PHASE 9.3 - COMPLETE CONSOLE CAPTURE
+# PHASE 9.4 - SAFE COMPLETE CONSOLE TRANSCRIPT
 # ============================================================
 #
-# Use one console file per deployment cycle so a 3010/reboot
-# does not overwrite the previous cycle.
-#
-# Examples:
-#
-#   ConsoleOutput-Cycle1.log
-#   ConsoleOutput-Cycle2.log
-#   ConsoleOutput-Cycle3.log
-#
-# All controller Write-ItinoConsole output and all child-script output
-# are routed through Write-ItinoConsole after this point.
+# Native Start-Transcript is used here. No Write-Host calls are
+# replaced or wrapped, so enabling console logging cannot change
+# normal controller execution.
 # ============================================================
 
+function Get-ItinoNextConsoleCycle {
 
-function Get-ItinoConsoleCycle {
+    $Cycle = 1
 
-    $Cycle =
-        1
-
-
-    if (
-        Test-Path -LiteralPath $DeploymentStateFile
-    ) {
+    if (Test-Path -LiteralPath $DeploymentStateFile) {
 
         try {
 
@@ -705,10 +695,8 @@ function Get-ItinoConsoleCycle {
                 ConvertFrom-Json `
                     -ErrorAction Stop
 
-
             if (
-                [string]$ExistingState.ComputerName -eq
-                    [string]$env:COMPUTERNAME -and
+                [string]$ExistingState.ComputerName -eq [string]$env:COMPUTERNAME -and
                 [string]$ExistingState.Status -in @(
                     'InProgress',
                     'RestartRequired'
@@ -721,99 +709,66 @@ function Get-ItinoConsoleCycle {
         }
         catch {
 
-            $Cycle =
-                1
+            $Cycle = 1
         }
     }
-
 
     if ($Cycle -lt 1) {
         $Cycle = 1
     }
 
-
     return [int]$Cycle
 }
 
 
-$ConsoleOutputCycle =
-    Get-ItinoConsoleCycle
+function Stop-ItinoConsoleTranscript {
 
+    if (-not $script:ConsoleTranscriptStarted) {
+        return
+    }
 
-$ConsoleOutputFile =
-    Join-Path `
-        $BasePath `
-        (
-            "ConsoleOutput-Cycle$ConsoleOutputCycle.log"
-        )
+    try {
+
+        Stop-Transcript |
+            Out-Null
+    }
+    catch {
+    }
+
+    $script:ConsoleTranscriptStarted =
+        $false
+}
 
 
 if ($SaveFullConsoleOutput) {
 
+    $ConsoleOutputCycle =
+        Get-ItinoNextConsoleCycle
+
+    $ConsoleOutputFile =
+        Join-Path `
+            $BasePath `
+            (
+                "ConsoleOutput-Cycle$ConsoleOutputCycle.log"
+            )
+
     try {
 
-        @(
-            '============================================================'
-            'ITINO DRIVER DEPLOYMENT CONSOLE OUTPUT'
-            '============================================================'
-            "Computer   : $env:COMPUTERNAME"
-            "Started    : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-            "Controller : $ScriptName v$ScriptVersion"
-            "Cycle      : $ConsoleOutputCycle"
-            '============================================================'
-            ''
-        ) |
-            Set-Content `
-                -LiteralPath $ConsoleOutputFile `
-                -Encoding UTF8
+        Start-Transcript `
+            -LiteralPath $ConsoleOutputFile `
+            -Force `
+            -ErrorAction Stop |
+        Out-Null
+
+        $script:ConsoleTranscriptStarted =
+            $true
     }
     catch {
 
-        Microsoft.PowerShell.Utility\Write-Host (
-            'WARNING: Unable to initialize cycle console log. ' +
-            $_.Exception.Message
+        Write-Host (
+            'WARNING: Full console transcript could not be started. ' +
+            "Reason: $($_.Exception.Message)"
         )
-    }
-}
-
-
-function Write-ItinoConsole {
-
-    param(
-        [AllowNull()]
-        [object]$Object = ''
-    )
-
-
-    if ($null -eq $Object) {
-        $Line = ''
-    }
-    else {
-        $Line = [string]$Object
-    }
-
-
-    Microsoft.PowerShell.Utility\Write-Host $Line
-
-
-    if (
-        $SaveFullConsoleOutput -and
-        -not [string]::IsNullOrWhiteSpace(
-            [string]$ConsoleOutputFile
-        )
-    ) {
-
-        try {
-
-            Add-Content `
-                -LiteralPath $ConsoleOutputFile `
-                -Value $Line `
-                -Encoding UTF8
-        }
-        catch {
-
-            # Console logging must never stop driver deployment.
-        }
     }
 }
 
@@ -841,7 +796,7 @@ if (
     }
     catch {
 
-        Write-ItinoConsole (
+        Write-Host (
             'WARNING: Unable to remove previous driver deployment ' +
             "error log. Error: $($_.Exception.Message)"
         )
@@ -877,7 +832,7 @@ if (
     }
     catch {
 
-        Write-ItinoConsole (
+        Write-Host (
             'WARNING: Unable to remove previous restart marker. ' +
             "Error: $($_.Exception.Message)"
         )
@@ -931,7 +886,8 @@ function Add-DeploymentBufferLine {
 
     [void]$DeploymentOutputBuffer.Add(
         [string]$Line
-    )}
+    )
+}
 
 
 # ============================================================
@@ -963,7 +919,7 @@ function Write-Log {
 
     # Always show controller output.
 
-    Write-ItinoConsole $Entry
+    Write-Host $Entry
 
 
     # Always preserve controller information in memory.
@@ -999,11 +955,11 @@ function Invoke-DeploymentScript {
     )
 
 
-    Write-ItinoConsole ''
-    Write-ItinoConsole '============================================================'
-    Write-ItinoConsole "Starting: $Name"
-    Write-ItinoConsole '============================================================'
-    Write-ItinoConsole ''
+    Write-Host ''
+    Write-Host '============================================================'
+    Write-Host "Starting: $Name"
+    Write-Host '============================================================'
+    Write-Host ''
 
 
     Write-Log -Message (
@@ -1082,7 +1038,7 @@ function Invoke-DeploymentScript {
 
             # Show child output immediately.
 
-            Write-ItinoConsole $Line
+            Write-Host $Line
 
 
             # Keep the exact same output in memory.
@@ -1117,7 +1073,7 @@ function Invoke-DeploymentScript {
             )
 
 
-        Write-ItinoConsole (
+        Write-Host (
             "ERROR: $LaunchError"
         )
 
@@ -1246,15 +1202,15 @@ function Save-DeploymentErrorLog {
                 -Encoding UTF8
 
 
-        Write-ItinoConsole ''
+        Write-Host ''
 
-        Write-ItinoConsole (
+        Write-Host (
             "Driver deployment error log saved to: $PersistentErrorLog"
         )
     }
     catch {
 
-        Write-ItinoConsole (
+        Write-Host (
             'ERROR: Unable to create driver deployment error log. ' +
             "Error: $($_.Exception.Message)"
         )
@@ -1644,8 +1600,12 @@ function Remove-EntireItinoRoot {
         return
     }
 
-    Write-ItinoConsole ''
-    Write-ItinoConsole (
+    # Close the transcript file handle before deleting its
+    # parent C:\ProgramData\Itino directory.
+    Stop-ItinoConsoleTranscript
+
+    Write-Host ''
+    Write-Host (
         "Final clean success. Removing complete ITINO data root: $ItinoRoot"
     )
 
@@ -1661,12 +1621,12 @@ function Remove-EntireItinoRoot {
                 -ErrorAction Stop
         }
 
-        Write-ItinoConsole (
+        Write-Host (
             'All ITINO-generated ProgramData files were removed.'
         )
     }
     catch {
-        Write-ItinoConsole (
+        Write-Host (
             'WARNING: Deployment succeeded, but the complete ITINO ' +
             "ProgramData root could not be removed. Error: $($_.Exception.Message)"
         )
@@ -1717,7 +1677,7 @@ function Remove-DriverRollbackData {
             -ErrorAction Stop
 
 
-        Write-ItinoConsole (
+        Write-Host (
             "Removed driver rollback folder: $DriverRollbackRoot"
         )
     }
@@ -1748,9 +1708,9 @@ function Invoke-FinalCleanup {
     }
 
 
-    Write-ItinoConsole ''
+    Write-Host ''
 
-    Write-ItinoConsole (
+    Write-Host (
         "Cleaning driver deployment working folder: $BasePath"
     )
 
@@ -1769,13 +1729,13 @@ function Invoke-FinalCleanup {
         }
 
 
-        Write-ItinoConsole (
+        Write-Host (
             'Driver deployment working files removed.'
         )
     }
     catch {
 
-        Write-ItinoConsole (
+        Write-Host (
             'WARNING: Unable to completely remove driver deployment ' +
             "working files. Error: $($_.Exception.Message)"
         )
@@ -1994,21 +1954,21 @@ function Show-DeploymentFinished {
         [string]$FailedStage
     )
 
-    Write-ItinoConsole ''
-    Write-ItinoConsole '============================================================'
-    Write-ItinoConsole 'Deployment Finished'
-    Write-ItinoConsole '============================================================'
-    Write-ItinoConsole ''
-    Write-ItinoConsole "Status           : $Status"
-    Write-ItinoConsole "Exit Code        : $ExitCode"
-    Write-ItinoConsole "Restart Required : $RestartRequired"
+    Write-Host ''
+    Write-Host '============================================================'
+    Write-Host 'Deployment Finished'
+    Write-Host '============================================================'
+    Write-Host ''
+    Write-Host "Status           : $Status"
+    Write-Host "Exit Code        : $ExitCode"
+    Write-Host "Restart Required : $RestartRequired"
 
     if (-not [string]::IsNullOrWhiteSpace($FailedStage)) {
-        Write-ItinoConsole "Failed Stage     : $FailedStage"
+        Write-Host "Failed Stage     : $FailedStage"
     }
 
-    Write-ItinoConsole ''
-    Write-ItinoConsole '============================================================'
+    Write-Host ''
+    Write-Host '============================================================'
 }
 
 
@@ -2134,16 +2094,16 @@ function Get-ControllerDeviceDisplayName {
 
 
 function Show-DriverVerification {
-    Write-ItinoConsole ''
-    Write-ItinoConsole '============================================================'
-    Write-ItinoConsole 'Driver Verification'
-    Write-ItinoConsole '============================================================'
-    Write-ItinoConsole ''
+    Write-Host ''
+    Write-Host '============================================================'
+    Write-Host 'Driver Verification'
+    Write-Host '============================================================'
+    Write-Host ''
 
     if (-not (Test-Path -LiteralPath $VerificationFile)) {
-        Write-ItinoConsole '[WARNING] DriverVerification.json was not available.'
-        Write-ItinoConsole ''
-        Write-ItinoConsole '============================================================'
+        Write-Host '[WARNING] DriverVerification.json was not available.'
+        Write-Host ''
+        Write-Host '============================================================'
         return
     }
 
@@ -2197,7 +2157,7 @@ function Show-DriverVerification {
             $null -ne $VerificationStatus
         ) {
 
-            Write-ItinoConsole (
+            Write-Host (
                 "Status             : $VerificationStatus"
             )
         }
@@ -2207,7 +2167,7 @@ function Show-DriverVerification {
             $null -ne $VerificationRestartRequired
         ) {
 
-            Write-ItinoConsole (
+            Write-Host (
                 "Restart Required   : $VerificationRestartRequired"
             )
         }
@@ -2286,7 +2246,7 @@ function Show-DriverVerification {
             if (
                 $null -ne $BeforeErrors
             ) {
-                Write-ItinoConsole (
+                Write-Host (
                     "Before Errors      : $BeforeErrors"
                 )
             }
@@ -2295,7 +2255,7 @@ function Show-DriverVerification {
             if (
                 $null -ne $AfterErrors
             ) {
-                Write-ItinoConsole (
+                Write-Host (
                     "After Errors       : $AfterErrors"
                 )
             }
@@ -2304,7 +2264,7 @@ function Show-DriverVerification {
             if (
                 $null -ne $FixedErrors
             ) {
-                Write-ItinoConsole (
+                Write-Host (
                     "Fixed Errors       : $FixedErrors"
                 )
             }
@@ -2313,7 +2273,7 @@ function Show-DriverVerification {
             if (
                 $null -ne $RemainingErrors
             ) {
-                Write-ItinoConsole (
+                Write-Host (
                     "Remaining Errors   : $RemainingErrors"
                 )
             }
@@ -2322,7 +2282,7 @@ function Show-DriverVerification {
             if (
                 $null -ne $NewErrors
             ) {
-                Write-ItinoConsole (
+                Write-Host (
                     "New Errors         : $NewErrors"
                 )
             }
@@ -2331,7 +2291,7 @@ function Show-DriverVerification {
             if (
                 $null -ne $RestartDevices
             ) {
-                Write-ItinoConsole (
+                Write-Host (
                     "Restart Devices    : $RestartDevices"
                 )
             }
@@ -2343,8 +2303,8 @@ function Show-DriverVerification {
             $Verification.FixedDevices.Count -gt 0
         ) {
 
-            Write-ItinoConsole ''
-            Write-ItinoConsole 'Fixed Devices:'
+            Write-Host ''
+            Write-Host 'Fixed Devices:'
 
 
             foreach (
@@ -2356,7 +2316,7 @@ function Show-DriverVerification {
                         -Device $Device
 
 
-                Write-ItinoConsole (
+                Write-Host (
                     "  [FIXED] $DisplayName"
                 )
             }
@@ -2368,8 +2328,8 @@ function Show-DriverVerification {
             $Verification.RemainingDevices.Count -gt 0
         ) {
 
-            Write-ItinoConsole ''
-            Write-ItinoConsole 'Remaining Device Errors:'
+            Write-Host ''
+            Write-Host 'Remaining Device Errors:'
 
 
             foreach (
@@ -2381,7 +2341,7 @@ function Show-DriverVerification {
                         -Device $Device
 
 
-                Write-ItinoConsole (
+                Write-Host (
                     "  [REMAINING] $DisplayName " +
                     "(Code $($Device.ConfigManagerErrorCode))"
                 )
@@ -2414,8 +2374,8 @@ function Show-DriverVerification {
             $CurrentNewErrors.Count -gt 0
         ) {
 
-            Write-ItinoConsole ''
-            Write-ItinoConsole 'New Device Errors:'
+            Write-Host ''
+            Write-Host 'New Device Errors:'
 
 
             foreach (
@@ -2427,7 +2387,7 @@ function Show-DriverVerification {
                         -Device $Device
 
 
-                Write-ItinoConsole (
+                Write-Host (
                     "  [NEW] $DisplayName " +
                     "(Code $($Device.ConfigManagerErrorCode))"
                 )
@@ -2436,14 +2396,14 @@ function Show-DriverVerification {
     }
     catch {
 
-        Write-ItinoConsole (
+        Write-Host (
             '[WARNING] Unable to read DriverVerification.json. Reason: ' +
             $_.Exception.Message
         )
     }
 
-    Write-ItinoConsole ''
-    Write-ItinoConsole '============================================================'
+    Write-Host ''
+    Write-Host '============================================================'
 }
 
 # MAIN STATE
@@ -2475,11 +2435,11 @@ $FinalExitCode =
 
 try {
 
-    Write-ItinoConsole ''
-    Write-ItinoConsole '============================================================'
-    Write-ItinoConsole 'ITINO Driver Deployment'
-    Write-ItinoConsole '============================================================'
-    Write-ItinoConsole ''
+    Write-Host ''
+    Write-Host '============================================================'
+    Write-Host 'ITINO Driver Deployment'
+    Write-Host '============================================================'
+    Write-Host ''
 
 
     Write-Log -Message (
@@ -2516,16 +2476,16 @@ try {
         "Write log files: $WriteLogFiles"
     )
 
-
     Write-Log -Message (
         "Save full console output: $SaveFullConsoleOutput"
     )
 
-
-    if ($SaveFullConsoleOutput) {
-
+    if (
+        $SaveFullConsoleOutput -and
+        $script:ConsoleTranscriptStarted
+    ) {
         Write-Log -Message (
-            "Full captured console output file for cycle $ConsoleOutputCycle: $ConsoleOutputFile"
+            "Console transcript file: $ConsoleOutputFile"
         )
     }
 
@@ -3087,18 +3047,18 @@ try {
     # CONSOLE SUMMARY
     # ========================================================
 
-    Write-ItinoConsole ''
-    Write-ItinoConsole '============================================================'
-    Write-ItinoConsole 'Driver Deployment Summary'
-    Write-ItinoConsole '============================================================'
-    Write-ItinoConsole ''
+    Write-Host ''
+    Write-Host '============================================================'
+    Write-Host 'Driver Deployment Summary'
+    Write-Host '============================================================'
+    Write-Host ''
 
 
     foreach (
         $Result in $Results
     ) {
 
-        Write-ItinoConsole (
+        Write-Host (
             "{0,-30} Exit Code: {1}" -f `
                 $Result.Name,
                 $Result.ExitCode
@@ -3106,61 +3066,61 @@ try {
     }
 
 
-    Write-ItinoConsole ''
+    Write-Host ''
 
-    Write-ItinoConsole (
+    Write-Host (
         "Status           : $OverallStatus"
     )
 
 
-    Write-ItinoConsole (
+    Write-Host (
         "Restart Required : $RestartRequired"
     )
 
 
     if ($FailedStage) {
 
-        Write-ItinoConsole (
+        Write-Host (
             "Failed Stage      : $FailedStage"
         )
     }
 
     if ($ComputerSummary) {
-        Write-ItinoConsole ''
-        Write-ItinoConsole "Computer         : $($ComputerSummary.ComputerName)"
-        Write-ItinoConsole "Manufacturer     : $($ComputerSummary.Manufacturer)"
-        Write-ItinoConsole "Model            : $($ComputerSummary.Model)"
+        Write-Host ''
+        Write-Host "Computer         : $($ComputerSummary.ComputerName)"
+        Write-Host "Manufacturer     : $($ComputerSummary.Manufacturer)"
+        Write-Host "Model            : $($ComputerSummary.Model)"
     }
 
     if ($VerificationSummary) {
-        Write-ItinoConsole ''
-        Write-ItinoConsole 'Verification'
-        Write-ItinoConsole "Errors Before    : $($VerificationSummary.DeviceErrorsBefore)"
-        Write-ItinoConsole "Errors After     : $($VerificationSummary.DeviceErrorsAfter)"
-        Write-ItinoConsole "Fixed            : $($VerificationSummary.FixedDeviceErrors)"
-        Write-ItinoConsole "Remaining        : $($VerificationSummary.RemainingDeviceErrors)"
+        Write-Host ''
+        Write-Host 'Verification'
+        Write-Host "Errors Before    : $($VerificationSummary.DeviceErrorsBefore)"
+        Write-Host "Errors After     : $($VerificationSummary.DeviceErrorsAfter)"
+        Write-Host "Fixed            : $($VerificationSummary.FixedDeviceErrors)"
+        Write-Host "Remaining        : $($VerificationSummary.RemainingDeviceErrors)"
     }
 
     if ($DriverChangesSummary) {
-        Write-ItinoConsole ''
-        Write-ItinoConsole 'Driver Changes'
-        Write-ItinoConsole "Changed          : $($DriverChangesSummary.ChangedCount)"
-        Write-ItinoConsole "Added            : $($DriverChangesSummary.AddedCount)"
-        Write-ItinoConsole "Removed          : $($DriverChangesSummary.RemovedCount)"
+        Write-Host ''
+        Write-Host 'Driver Changes'
+        Write-Host "Changed          : $($DriverChangesSummary.ChangedCount)"
+        Write-Host "Added            : $($DriverChangesSummary.AddedCount)"
+        Write-Host "Removed          : $($DriverChangesSummary.RemovedCount)"
     }
 
     if ($RestartReasons.Count -gt 0) {
-        Write-ItinoConsole ''
-        Write-ItinoConsole 'Restart Reasons'
+        Write-Host ''
+        Write-Host 'Restart Reasons'
 
         foreach ($RestartReason in $RestartReasons) {
-            Write-ItinoConsole " - $RestartReason"
+            Write-Host " - $RestartReason"
         }
     }
 
-    Write-ItinoConsole ''
-    Write-ItinoConsole '============================================================'
-    Write-ItinoConsole ''
+    Write-Host ''
+    Write-Host '============================================================'
+    Write-Host ''
 
 
     # ========================================================
@@ -3311,12 +3271,14 @@ try {
     # RETURN RESULT TO PARENT DEPLOYMENT
     # ========================================================
 
-    Write-ItinoConsole ''
+    Write-Host ''
 
-    Write-ItinoConsole (
+    Write-Host (
         "Driver deployment controller exit code: $FinalExitCode"
     )
 
+
+    Stop-ItinoConsoleTranscript
 
     Exit-ItinoDeploymentMutex
 
@@ -3366,7 +3328,7 @@ catch {
     }
     catch {
 
-        Write-ItinoConsole (
+        Write-Host (
             "ERROR: $ErrorMessage"
         )
     }
@@ -3409,12 +3371,14 @@ catch {
         Invoke-FinalCleanup
     }
     else {
-        Write-ItinoConsole ''
-        Write-ItinoConsole (
+        Write-Host ''
+        Write-Host (
             'Failure artifacts preserved under C:\ProgramData\Itino.'
         )
     }
 
+
+    Stop-ItinoConsoleTranscript
 
     Exit-ItinoDeploymentMutex
 
