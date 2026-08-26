@@ -63,24 +63,22 @@ $ScriptName =
 # ============================================================
 
 # ------------------------------------------------------------
+# Title   : Reliable AC Power Detection
+# Version : 1.1.5
+# Reason  : Replaces Win32_Battery.BatteryStatus AC inference
+#           with SystemInformation.PowerStatus.PowerLineStatus.
+#           Firmware battery safety threshold raised to 50%.
+# Date    : 2026-08-26
+# ------------------------------------------------------------
+
+
+# ------------------------------------------------------------
 # Title   : Safe Native Console Transcript
 # Version : 1.1.4
 # Reason  : Uses Start-Transcript instead of the Phase 9.3
 #           custom Write-Host wrapper. Keeps separate console
 #           logs per restart cycle without changing startup.
 # Date    : 2026-08-26
-# ------------------------------------------------------------
-
-
-# ------------------------------------------------------------
-# Title   : Driver Verification Console Reporting
-# Version : 1.0.0
-# Reason  : Fixes blank device names in the final verification
-#           output by falling back to FriendlyName, InstanceId,
-#           DeviceID and PNPDeviceID. Also aligns the controller
-#           summary with the current DriverVerification.json
-#           property names and reads NewErrors correctly.
-# Date    : 2026-08-21
 # ------------------------------------------------------------
 
 # ------------------------------------------------------------
@@ -94,8 +92,21 @@ $ScriptName =
 # Date    : 2026-08-25
 # ------------------------------------------------------------
 
+# ------------------------------------------------------------
+# Title   : Driver Verification Console Reporting
+# Version : 1.0.0
+# Reason  : Fixes blank device names in the final verification
+#           output by falling back to FriendlyName, InstanceId,
+#           DeviceID and PNPDeviceID. Also aligns the controller
+#           summary with the current DriverVerification.json
+#           property names and reads NewErrors correctly.
+# Date    : 2026-08-21
+# ------------------------------------------------------------
+
+
+
 $ScriptVersion =
-    '1.1.4'
+    '1.1.5'
 
 $ScriptUpdated =
     '2026-08-25'
@@ -252,7 +263,7 @@ $DeleteEntireItinoRootOnCleanSuccess =
 # If a battery exists, BIOS/Firmware updates require at least
 # this charge level and the battery must not be discharging.
 $MinimumFirmwareBatteryPercent =
-    40
+    50
 
 # Guard checked between controller stages.
 $MaximumControllerRuntimeMinutes =
@@ -1413,10 +1424,56 @@ function Get-ItinoFirmwareSafety {
         $null
 
     $OnExternalPower =
-        $true
+        $false
+
+    $PowerLineStatus =
+        'Unknown'
 
     $Reason =
-        'No battery detected; firmware power safety passed.'
+        'Power state has not yet been evaluated.'
+
+
+    # --------------------------------------------------------
+    # AC POWER DETECTION
+    # --------------------------------------------------------
+    #
+    # Win32_Battery.BatteryStatus is not reliable for deciding
+    # whether AC power is connected. Some systems report the
+    # battery as discharging even while external power is
+    # present.
+    #
+    # Use Windows Forms PowerStatus.PowerLineStatus instead.
+    # --------------------------------------------------------
+
+    try {
+
+        Add-Type `
+            -AssemblyName System.Windows.Forms `
+            -ErrorAction Stop
+
+
+        $PowerLineStatus =
+            [string][System.Windows.Forms.SystemInformation]::PowerStatus.PowerLineStatus
+
+
+        $OnExternalPower =
+            (
+                $PowerLineStatus -eq 'Online'
+            )
+    }
+    catch {
+
+        $PowerLineStatus =
+            'Unknown'
+
+        $OnExternalPower =
+            $false
+    }
+
+
+    # --------------------------------------------------------
+    # BATTERY DETECTION / CHARGE LEVEL
+    # --------------------------------------------------------
 
     try {
 
@@ -1427,88 +1484,124 @@ function Get-ItinoFirmwareSafety {
                     -ErrorAction Stop
             )
 
+
         if ($Batteries.Count -gt 0) {
 
             $BatteryPresent =
                 $true
 
+
             $PercentValues =
                 @(
                     $Batteries |
                     ForEach-Object {
-                        if ($null -ne $_.EstimatedChargeRemaining) {
+
+                        if (
+                            $null -ne $_.EstimatedChargeRemaining
+                        ) {
+
                             [int]$_.EstimatedChargeRemaining
                         }
                     }
                 )
 
+
             if ($PercentValues.Count -gt 0) {
+
                 $BatteryPercent =
                     (
                         $PercentValues |
                         Measure-Object -Minimum
                     ).Minimum
             }
-
-            $Discharging =
-                @(
-                    $Batteries |
-                    Where-Object {
-                        [int]$_.BatteryStatus -eq 1
-                    }
-                ).Count -gt 0
-
-            $OnExternalPower =
-                -not $Discharging
-
-            if (-not $OnExternalPower) {
-                $Reason =
-                    'Battery is discharging.'
-            }
-            elseif (
-                $null -ne $BatteryPercent -and
-                $BatteryPercent -lt $MinimumFirmwareBatteryPercent
-            ) {
-                $Reason =
-                    (
-                        "Battery charge is $BatteryPercent%. " +
-                        "Minimum is $MinimumFirmwareBatteryPercent%."
-                    )
-            }
-            else {
-                $Reason =
-                    'External-power/battery requirements passed.'
-            }
         }
     }
     catch {
 
-        $OnExternalPower =
-            $false
+        # If battery enumeration fails, keep BatteryPresent false
+        # and continue using the AC state. On portable systems the
+        # final safety gate will fail safe if charge is unknown.
+    }
+
+
+    # --------------------------------------------------------
+    # FIRMWARE SAFETY DECISION
+    # --------------------------------------------------------
+
+    if (-not $OnExternalPower) {
 
         $Reason =
             (
-                'Power state could not be determined. ' +
-                "Firmware updates blocked. Reason: $($_.Exception.Message)"
+                'External AC power is not connected. ' +
+                "PowerLineStatus=$PowerLineStatus."
             )
     }
+    elseif (
+        $BatteryPresent -and
+        $null -eq $BatteryPercent
+    ) {
+
+        $Reason =
+            (
+                'Battery is present, but charge percentage could not be determined.'
+            )
+    }
+    elseif (
+        $BatteryPresent -and
+        $BatteryPercent -lt $MinimumFirmwareBatteryPercent
+    ) {
+
+        $Reason =
+            (
+                "Battery charge is $BatteryPercent%. " +
+                "Minimum required is $MinimumFirmwareBatteryPercent%."
+            )
+    }
+    else {
+
+        $Reason =
+            (
+                'External AC power is connected and firmware battery ' +
+                'safety requirements are satisfied.'
+            )
+    }
+
 
     $Allowed =
         $OnExternalPower -and
         (
-            $null -eq $BatteryPercent -or
-            $BatteryPercent -ge $MinimumFirmwareBatteryPercent
+            -not $BatteryPresent -or
+            (
+                $null -ne $BatteryPercent -and
+                $BatteryPercent -ge $MinimumFirmwareBatteryPercent
+            )
         )
 
+
     return [pscustomobject]@{
-        Allowed = $Allowed
-        BatteryPresent = $BatteryPresent
-        BatteryPercent = $BatteryPercent
-        OnExternalPower = $OnExternalPower
-        Reason = $Reason
+
+        Allowed =
+            $Allowed
+
+        BatteryPresent =
+            $BatteryPresent
+
+        BatteryPercent =
+            $BatteryPercent
+
+        OnExternalPower =
+            $OnExternalPower
+
+        PowerLineStatus =
+            $PowerLineStatus
+
+        MinimumBatteryPercent =
+            $MinimumFirmwareBatteryPercent
+
+        Reason =
+            $Reason
     }
 }
-
 
 function Get-ItinoBitLockerSummary {
 
@@ -2580,7 +2673,9 @@ try {
         "Allowed=$($FirmwareSafety.Allowed); " +
         "BatteryPresent=$($FirmwareSafety.BatteryPresent); " +
         "BatteryPercent=$($FirmwareSafety.BatteryPercent); " +
+        "MinimumBatteryPercent=$($FirmwareSafety.MinimumBatteryPercent); " +
         "ExternalPower=$($FirmwareSafety.OnExternalPower); " +
+        "PowerLineStatus=$($FirmwareSafety.PowerLineStatus); " +
         "Reason=$($FirmwareSafety.Reason)"
     )
 
