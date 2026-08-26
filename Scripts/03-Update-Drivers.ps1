@@ -60,6 +60,17 @@ $ScriptName =
 # ============================================================
 
 # ------------------------------------------------------------
+# Title   : HPIA Exit-Code Reliability
+# Version : 1.4.2
+# Reason  : Adds a final WaitForExit()/Refresh before reading
+#           ExitCode. If HPIA completes but PowerShell cannot
+#           expose the exit code, the condition is non-fatal
+#           and final Windows Update continues.
+# Date    : 2026-08-26
+# ------------------------------------------------------------
+
+
+# ------------------------------------------------------------
 # Title   : HP Image Assistant Path Alignment
 # Version : 1.4.1
 # Reason  : Uses the Tools\HPImageAssistant location prepared
@@ -171,7 +182,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.4.1'
+    '1.4.2'
 
 $ScriptUpdated =
     '2026-08-26'
@@ -816,19 +827,77 @@ function Invoke-ProcessWithTimeout {
             }
 
 
+            try {
+
+                $Process.WaitForExit()
+            }
+            catch {
+            }
+
+
             throw (
                 "$ProcessName timed out after $TimeoutSeconds seconds."
             )
         }
 
 
-        $Process.Refresh()
+        # Windows PowerShell 5.1 can occasionally leave ExitCode
+        # unavailable after WaitForExit(milliseconds). A final
+        # parameterless WaitForExit() ensures termination details
+        # are fully available before ExitCode is read.
+
+        try {
+
+            $Process.WaitForExit()
+        }
+        catch {
+        }
+
+
+        try {
+
+            $Process.Refresh()
+        }
+        catch {
+        }
+
+
+        $ExitCode =
+            $null
+
+
+        $ExitCodeAvailable =
+            $false
+
+
+        try {
+
+            if ($Process.HasExited) {
+
+                $ExitCode =
+                    [int]$Process.ExitCode
+
+                $ExitCodeAvailable =
+                    $true
+            }
+        }
+        catch {
+
+            $ExitCode =
+                $null
+
+            $ExitCodeAvailable =
+                $false
+        }
 
 
         return [PSCustomObject]@{
 
             ExitCode =
-                $Process.ExitCode
+                $ExitCode
+
+            ExitCodeAvailable =
+                $ExitCodeAvailable
 
             ProcessId =
                 $Process.Id
@@ -4156,6 +4225,23 @@ function Invoke-HPDriverUpdate {
             ) `
             -TimeoutSeconds $OEMProcessTimeoutSeconds `
             -ProcessName 'HP Image Assistant'
+
+
+    if (
+        -not $Process.ExitCodeAvailable
+    ) {
+
+        Write-Log `
+            -Message (
+                'HP Image Assistant completed, but its exit code could ' +
+                'not be read reliably. Continuing with final Windows ' +
+                'Update instead of treating this as a hard failure.'
+            ) `
+            -Level 'WARNING'
+
+
+        return
+    }
 
 
     Write-Log -Message (
