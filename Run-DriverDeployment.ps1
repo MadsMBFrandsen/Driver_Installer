@@ -63,6 +63,16 @@ $ScriptName =
 # ============================================================
 
 # ------------------------------------------------------------
+# Title   : Validated Cycle / Single Instance Result
+# Version : 1.1.6
+# Reason  : Console transcript starts only after the deployment
+#           mutex and cycle validation. Concurrent runs return
+#           exit code 1618 without modifying active artifacts.
+# Date    : 2026-08-26
+# ------------------------------------------------------------
+
+
+# ------------------------------------------------------------
 # Title   : Reliable AC Power Detection
 # Version : 1.1.5
 # Reason  : Replaces Win32_Battery.BatteryStatus AC inference
@@ -81,16 +91,6 @@ $ScriptName =
 # Date    : 2026-08-26
 # ------------------------------------------------------------
 
-# ------------------------------------------------------------
-# Title   : Deployment Sequence Integration
-# Version : 1.1.0
-# Reason  : Adds restart-cycle state, original rollback-baseline
-#           preservation, maximum cycle protection, single-
-#           instance protection, firmware power-safety gating,
-#           failure artifact preservation and complete ITINO
-#           cleanup after final clean success.
-# Date    : 2026-08-25
-# ------------------------------------------------------------
 
 # ------------------------------------------------------------
 # Title   : Driver Verification Console Reporting
@@ -103,10 +103,19 @@ $ScriptName =
 # Date    : 2026-08-21
 # ------------------------------------------------------------
 
-
+# ------------------------------------------------------------
+# Title   : Deployment Sequence Integration
+# Version : 1.1.0
+# Reason  : Adds restart-cycle state, original rollback-baseline
+#           preservation, maximum cycle protection, single-
+#           instance protection, firmware power-safety gating,
+#           failure artifact preservation and complete ITINO
+#           cleanup after final clean success.
+# Date    : 2026-08-25
+# ------------------------------------------------------------
 
 $ScriptVersion =
-    '1.1.5'
+    '1.1.6'
 
 $ScriptUpdated =
     '2026-08-25'
@@ -528,10 +537,10 @@ $MainLogFile =
         'DriverDeployment-Main.log'
 
 
-$ConsoleOutputFile =
+$script:ConsoleOutputFile =
     $null
 
-$ConsoleOutputCycle =
+$script:ConsoleOutputCycle =
     1
 
 $script:ConsoleTranscriptStarted =
@@ -682,53 +691,75 @@ if ($WriteLogFiles) {
 
 
 # ============================================================
-# PHASE 9.4 - SAFE COMPLETE CONSOLE TRANSCRIPT
+# PHASE 9.7 - VALIDATED-CYCLE CONSOLE TRANSCRIPT
 # ============================================================
 #
-# Native Start-Transcript is used here. No Write-Host calls are
-# replaced or wrapped, so enabling console logging cannot change
-# normal controller execution.
+# Transcript startup is deferred until AFTER:
+#   1. The single-instance mutex is acquired.
+#   2. Persistent deployment state is loaded.
+#   3. The deployment cycle is validated.
+#
+# A blocked second process therefore cannot create a false
+# ConsoleOutput-Cycle4.log.
 # ============================================================
 
-function Get-ItinoNextConsoleCycle {
+function Start-ItinoConsoleTranscript {
 
-    $Cycle = 1
-
-    if (Test-Path -LiteralPath $DeploymentStateFile) {
-
-        try {
-
-            $ExistingState =
-                Get-Content `
-                    -LiteralPath $DeploymentStateFile `
-                    -Raw `
-                    -ErrorAction Stop |
-                ConvertFrom-Json `
-                    -ErrorAction Stop
-
-            if (
-                [string]$ExistingState.ComputerName -eq [string]$env:COMPUTERNAME -and
-                [string]$ExistingState.Status -in @(
-                    'InProgress',
-                    'RestartRequired'
-                )
-            ) {
-
-                $Cycle =
-                    ([int]$ExistingState.Cycle) + 1
-            }
-        }
-        catch {
-
-            $Cycle = 1
-        }
+    if (-not $SaveFullConsoleOutput) {
+        return
     }
 
-    if ($Cycle -lt 1) {
-        $Cycle = 1
+    if (-not $script:DeploymentSession) {
+
+        Write-Host (
+            'WARNING: Console transcript cannot start because the ' +
+            'deployment session is not initialized.'
+        )
+
+        return
     }
 
-    return [int]$Cycle
+
+    $script:ConsoleOutputCycle =
+        [int]$script:DeploymentSession.Cycle
+
+
+    $script:ConsoleOutputFile =
+        Join-Path `
+            $BasePath `
+            (
+                "ConsoleOutput-Cycle$($script:ConsoleOutputCycle).log"
+            )
+
+
+    try {
+
+        Start-Transcript `
+            -LiteralPath $script:ConsoleOutputFile `
+            -Force `
+            -ErrorAction Stop |
+        Out-Null
+
+
+        $script:ConsoleTranscriptStarted =
+            $true
+
+
+        Write-Log -Message (
+            "Console transcript cycle: $($script:ConsoleOutputCycle)"
+        )
+
+        Write-Log -Message (
+            "Console transcript file: $($script:ConsoleOutputFile)"
+        )
+    }
+    catch {
+
+        Write-Host (
+            'WARNING: Full console transcript could not be started. ' +
+            "Reason: $($_.Exception.Message)"
+        )
+    }
 }
 
 
@@ -751,102 +782,59 @@ function Stop-ItinoConsoleTranscript {
 }
 
 
-if ($SaveFullConsoleOutput) {
+# ============================================================
+# PREVIOUS-RUN MARKER CLEANUP
+# ============================================================
+#
+# These are called only after the mutex has been acquired.
+# A second blocked controller must not modify files that belong
+# to the active deployment.
+# ============================================================
 
-    $ConsoleOutputCycle =
-        Get-ItinoNextConsoleCycle
+function Remove-ItinoPreviousFailureLog {
 
-    $ConsoleOutputFile =
-        Join-Path `
-            $BasePath `
-            (
-                "ConsoleOutput-Cycle$ConsoleOutputCycle.log"
+    if (
+        Test-Path -LiteralPath $PersistentErrorLog
+    ) {
+
+        try {
+
+            Remove-Item `
+                -LiteralPath $PersistentErrorLog `
+                -Force `
+                -ErrorAction Stop
+        }
+        catch {
+
+            Write-Host (
+                'WARNING: Unable to remove previous driver deployment ' +
+                "error log. Error: $($_.Exception.Message)"
             )
-
-    try {
-
-        Start-Transcript `
-            -LiteralPath $ConsoleOutputFile `
-            -Force `
-            -ErrorAction Stop |
-        Out-Null
-
-        $script:ConsoleTranscriptStarted =
-            $true
-    }
-    catch {
-
-        Write-Host (
-            'WARNING: Full console transcript could not be started. ' +
-            "Reason: $($_.Exception.Message)"
-        )
+        }
     }
 }
 
 
-# ============================================================
-# REMOVE OLD FAILURE LOG
-# ============================================================
-#
-# A new controller run starts with a clean failure state.
-#
-# A previous failure log should not be mistaken for the current
-# deployment result.
-# ============================================================
+function Remove-ItinoPreviousRestartMarker {
 
-if (
-    Test-Path -LiteralPath $PersistentErrorLog
-) {
+    if (
+        Test-Path -LiteralPath $RestartFile
+    ) {
 
-    try {
+        try {
 
-        Remove-Item `
-            -LiteralPath $PersistentErrorLog `
-            -Force `
-            -ErrorAction Stop
-    }
-    catch {
+            Remove-Item `
+                -LiteralPath $RestartFile `
+                -Force `
+                -ErrorAction Stop
+        }
+        catch {
 
-        Write-Host (
-            'WARNING: Unable to remove previous driver deployment ' +
-            "error log. Error: $($_.Exception.Message)"
-        )
-    }
-}
-
-
-# ============================================================
-# REMOVE OLD RESTART MARKER
-# ============================================================
-#
-# Every controller invocation represents a fresh driver pass.
-#
-# A restart request from the previous pass has already been
-# handled by the parent deployment before this controller is
-# launched again.
-#
-# Child scripts may CREATE or UPDATE this file.
-#
-# Child scripts should not remove it.
-# ============================================================
-
-if (
-    Test-Path -LiteralPath $RestartFile
-) {
-
-    try {
-
-        Remove-Item `
-            -LiteralPath $RestartFile `
-            -Force `
-            -ErrorAction Stop
-    }
-    catch {
-
-        Write-Host (
-            'WARNING: Unable to remove previous restart marker. ' +
-            "Error: $($_.Exception.Message)"
-        )
+            Write-Host (
+                'WARNING: Unable to remove previous restart marker. ' +
+                "Error: $($_.Exception.Message)"
+            )
+        }
     }
 }
 
@@ -1243,6 +1231,9 @@ $script:DeploymentMutexOwned =
 $script:DeploymentSession =
     $null
 
+$script:ControllerSpecialExitCode =
+    $null
+
 
 function Enter-ItinoDeploymentMutex {
 
@@ -1266,6 +1257,10 @@ function Enter-ItinoDeploymentMutex {
     }
 
     if (-not $script:DeploymentMutexOwned) {
+
+        $script:ControllerSpecialExitCode =
+            1618
+
         throw 'Another ITINO driver deployment is already running.'
     }
 }
@@ -2657,6 +2652,12 @@ try {
 
     Initialize-ItinoDeploymentSession
 
+    Start-ItinoConsoleTranscript
+
+    Remove-ItinoPreviousFailureLog
+
+    Remove-ItinoPreviousRestartMarker
+
     $FirmwareSafety =
         Get-ItinoFirmwareSafety
 
@@ -3384,6 +3385,42 @@ catch {
 
     $ErrorMessage =
         $_.Exception.Message
+
+
+    # ========================================================
+    # SPECIAL RESULT: ANOTHER INSTANCE IS ALREADY RUNNING
+    # ========================================================
+    #
+    # This is not an actual driver deployment failure.
+    #
+    # Do not:
+    #   - overwrite deployment state
+    #   - create DriverDeployment-Error.log
+    #   - change rollback data
+    #   - change restart markers
+    # ========================================================
+
+    if (
+        $script:ControllerSpecialExitCode -eq 1618
+    ) {
+
+        Write-Host ''
+        Write-Host '============================================================'
+        Write-Host 'ITINO Driver Deployment'
+        Write-Host '============================================================'
+        Write-Host ''
+        Write-Host 'Another ITINO driver deployment is already running.'
+        Write-Host 'No active deployment files were changed by this instance.'
+        Write-Host ''
+        Write-Host 'Exit Code : 1618'
+        Write-Host ''
+
+        Stop-ItinoConsoleTranscript
+
+        Exit-ItinoDeploymentMutex
+
+        exit 1618
+    }
 
 
     $DeploymentFailed =

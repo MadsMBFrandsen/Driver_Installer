@@ -60,6 +60,15 @@ $ScriptName =
 # ============================================================
 
 # ------------------------------------------------------------
+# Title   : HP Image Assistant Path Alignment
+# Version : 1.4.1
+# Reason  : Uses the Tools\HPImageAssistant location prepared
+#           and verified by 02-Install-OEM-Update-Tool.ps1.
+# Date    : 2026-08-26
+# ------------------------------------------------------------
+
+
+# ------------------------------------------------------------
 # Title   : OEM-Specific Startup Logging
 # Version : 1.4.0
 # Reason  : Generic firmware safety status is shown on all OEMs.
@@ -162,7 +171,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.4.0'
+    '1.4.1'
 
 $ScriptUpdated =
     '2026-08-26'
@@ -4017,6 +4026,14 @@ function Get-HPImageAssistantPath {
 
     $PossibleRoots =
         @(
+            # Exact path prepared by 02-Install-OEM-Update-Tool.ps1.
+            (
+                Join-Path `
+                    $ToolsPath `
+                    'HPImageAssistant'
+            )
+
+            # Legacy/fallback layouts.
             (
                 Join-Path `
                     $ToolsPath `
