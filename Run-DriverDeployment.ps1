@@ -61,6 +61,15 @@ $ScriptName =
 # ============================================================
 # VERSION HISTORY
 # ============================================================
+# ------------------------------------------------------------
+# Title   : Single Cleanup Switch
+# Version : 1.1.7
+# Reason  : Removes DeleteEntireItinoRootOnCleanSuccess and uses
+#           CleanupAfterDeployment as the single master switch
+#           for complete ITINO-root deletion on final success.
+# Date    : 2026-08-26
+# ------------------------------------------------------------
+
 
 # ------------------------------------------------------------
 # Title   : Validated Cycle / Single Instance Result
@@ -115,10 +124,10 @@ $ScriptName =
 # ------------------------------------------------------------
 
 $ScriptVersion =
-    '1.1.6'
+    '1.1.7'
 
 $ScriptUpdated =
-    '2026-08-25'
+    '2026-08-26'
 
 
 $ErrorActionPreference =
@@ -192,16 +201,26 @@ $KeepErrorLogOnFailure =
     $true
 
 
-# Delete the complete temporary driver deployment working folder
-# after final success or failure.
+# MASTER CLEANUP SWITCH
+#
+# $false:
+#   Keep all C:\ProgramData\Itino deployment data.
+#   Useful while testing/debugging.
+#
+# $true:
+#   On FINAL clean success (exit 0), remove the complete:
+#       C:\ProgramData\Itino\
 #
 # IMPORTANT:
+#   - Exit 3010 always preserves ITINO state for the next cycle.
+#   - Real failures preserve artifacts when
+#     $PreserveArtifactsOnFailure = $true.
 #
-# Cleanup is automatically skipped when the result is 3010,
-# because the driver workflow must run again after restart.
+# This is the only switch controlling complete ITINO-root
+# deletion after a successful deployment.
 
 $CleanupAfterDeployment =
-    $true
+    $false
 
 
 
@@ -260,13 +279,6 @@ $EnableSingleInstanceProtection =
 
 # Keep ALL ITINO diagnostics/rollback data on a real failure.
 $PreserveArtifactsOnFailure =
-    $true
-
-# On final clean success (exit 0), remove:
-#   C:\ProgramData\Itino\
-#
-# Installed drivers and OEM utilities remain installed.
-$DeleteEntireItinoRootOnCleanSuccess =
     $true
 
 # If a battery exists, BIOS/Firmware updates require at least
@@ -1684,7 +1696,23 @@ function Save-ItinoMachineReadableResult {
 
 function Remove-EntireItinoRoot {
 
-    if (-not $DeleteEntireItinoRootOnCleanSuccess) {
+    # CleanupAfterDeployment is the single master cleanup switch.
+    #
+    # If disabled, keep the complete ITINO tree including:
+    #   - console transcripts
+    #   - deployment state/results
+    #   - hardware/verification reports
+    #   - rollback data
+    #
+    # This also makes testing behavior predictable.
+
+    if (-not $CleanupAfterDeployment) {
+
+        Write-Log -Message (
+            'Final ITINO root cleanup skipped because ' +
+            'CleanupAfterDeployment is False.'
+        )
+
         return
     }
 
@@ -2587,6 +2615,11 @@ try {
         "Cleanup after deployment: $CleanupAfterDeployment"
     )
 
+    Write-Log -Message (
+        'Final clean-success ITINO root deletion follows ' +
+        "CleanupAfterDeployment: $CleanupAfterDeployment"
+    )
+
 
 
     Write-Log -Message (
@@ -2619,10 +2652,6 @@ try {
 
     Write-Log -Message (
         "Preserve artifacts on failure: $PreserveArtifactsOnFailure"
-    )
-
-    Write-Log -Message (
-        "Delete complete ITINO root on clean success: $DeleteEntireItinoRootOnCleanSuccess"
     )
 
     Write-Log -Message (
