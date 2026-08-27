@@ -96,6 +96,19 @@ $ControllerFileName =
     'Run-DriverDeployment.ps1'
 
 
+
+# Keep a live copy of AutoResume.log beside the deployment
+# package so the restart/resume history survives ProgramData
+# cleanup by the controller.
+$CopyLogsToScriptLocation =
+    $true
+
+
+# Folder created beside this wrapper.
+$CopiedLogsFolderName =
+    'Logs'
+
+
 # ============================================================
 # PATHS
 # ============================================================
@@ -114,6 +127,25 @@ $ControllerPath =
     Join-Path `
         $WrapperDirectory `
         $ControllerFileName
+
+
+
+$CopiedLogsRoot =
+    Join-Path `
+        $WrapperDirectory `
+        $CopiedLogsFolderName
+
+
+$CopiedAutoResumeLogDirectory =
+    Join-Path `
+        $CopiedLogsRoot `
+        $env:COMPUTERNAME
+
+
+$CopiedAutoResumeLogPath =
+    Join-Path `
+        $CopiedAutoResumeLogDirectory `
+        'AutoResume.log'
 
 
 # Dedicated wrapper log. This is separate from the controller
@@ -176,6 +208,30 @@ function Write-AutoResumeLog {
             -Value $Line `
             -Encoding UTF8 `
             -ErrorAction Stop
+
+
+        if ($CopyLogsToScriptLocation) {
+
+            if (-not (
+                Test-Path `
+                    -LiteralPath $CopiedAutoResumeLogDirectory
+            )) {
+
+                New-Item `
+                    -ItemType Directory `
+                    -Path $CopiedAutoResumeLogDirectory `
+                    -Force `
+                    -ErrorAction Stop |
+                Out-Null
+            }
+
+
+            Add-Content `
+                -LiteralPath $CopiedAutoResumeLogPath `
+                -Value $Line `
+                -Encoding UTF8 `
+                -ErrorAction Stop
+        }
     }
     catch {
 

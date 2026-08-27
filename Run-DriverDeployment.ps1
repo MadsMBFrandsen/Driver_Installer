@@ -134,7 +134,7 @@ $ScriptName =
 # ------------------------------------------------------------
 
 $ScriptVersion =
-    '1.1.11'
+    '1.1.12'
 
 $ScriptUpdated =
     '2026-08-27'
@@ -231,6 +231,26 @@ $KeepErrorLogOnFailure =
 
 $CleanupAfterDeployment =
     $false
+
+
+# Copy the AutoResume log and console transcript files to the
+# same drive/location as this deployment package.
+#
+# Example when scripts run from:
+#   D:\Driver_Installer
+#
+# Logs are copied to:
+#   D:\Driver_Installer\Logs\<Computer>\<SessionId>\
+#
+# This happens before final ProgramData cleanup, so the logs
+# survive even when CleanupAfterDeployment = $true.
+$CopyLogsToScriptLocation =
+    $true
+
+
+# Folder created beside Run-DriverDeployment.ps1.
+$CopiedLogsFolderName =
+    'Logs'
 
 
 
@@ -523,6 +543,13 @@ $ScriptsPath =
     Join-Path `
         $ScriptRoot `
         'Scripts'
+
+
+
+$CopiedLogsRoot =
+    Join-Path `
+        $ScriptRoot `
+        $CopiedLogsFolderName
 
 
 $ItinoRoot =
@@ -823,6 +850,158 @@ function Start-ItinoConsoleTranscript {
         Write-Host (
             'WARNING: Full console transcript could not be started. ' +
             "Reason: $($_.Exception.Message)"
+        )
+    }
+}
+
+
+function Copy-ItinoLogsToScriptLocation {
+
+    if (-not $CopyLogsToScriptLocation) {
+        return
+    }
+
+
+    try {
+
+        $SessionId =
+            if (
+                $script:DeploymentSession -and
+                $script:DeploymentSession.SessionId
+            ) {
+                [string]$script:DeploymentSession.SessionId
+            }
+            else {
+                'UnknownSession'
+            }
+
+
+        $DestinationDirectory =
+            Join-Path `
+                (Join-Path $CopiedLogsRoot $env:COMPUTERNAME) `
+                $SessionId
+
+
+        if (-not (
+            Test-Path `
+                -LiteralPath $DestinationDirectory
+        )) {
+
+            New-Item `
+                -ItemType Directory `
+                -Path $DestinationDirectory `
+                -Force `
+                -ErrorAction Stop |
+            Out-Null
+        }
+
+
+        # Copy every console transcript belonging to the current
+        # deployment session. This preserves Cycle 1, Cycle 2, etc.
+        #
+        # Newer transcript names contain the short session ID.
+        # The fallback also copies the current transcript explicitly.
+
+        $ShortSessionId =
+            if ($SessionId.Length -gt 8) {
+                $SessionId.Substring(0, 8)
+            }
+            else {
+                $SessionId
+            }
+
+
+        $SessionTranscriptPattern =
+            "ConsoleOutput-Session$ShortSessionId-Cycle*.log"
+
+
+        $TranscriptFiles =
+            @(
+                Get-ChildItem `
+                    -LiteralPath $BasePath `
+                    -Filter $SessionTranscriptPattern `
+                    -File `
+                    -ErrorAction SilentlyContinue
+            )
+
+
+        if (
+            $script:ConsoleOutputFile -and
+            (
+                Test-Path `
+                    -LiteralPath $script:ConsoleOutputFile `
+                    -PathType Leaf
+            )
+        ) {
+
+            $CurrentTranscript =
+                Get-Item `
+                    -LiteralPath $script:ConsoleOutputFile `
+                    -ErrorAction SilentlyContinue
+
+
+            if (
+                $CurrentTranscript -and
+                -not (
+                    $TranscriptFiles.FullName -contains
+                    $CurrentTranscript.FullName
+                )
+            ) {
+
+                $TranscriptFiles +=
+                    $CurrentTranscript
+            }
+        }
+
+
+        foreach ($TranscriptFile in $TranscriptFiles) {
+
+            Copy-Item `
+                -LiteralPath $TranscriptFile.FullName `
+                -Destination (
+                    Join-Path `
+                        $DestinationDirectory `
+                        $TranscriptFile.Name
+                ) `
+                -Force `
+                -ErrorAction Stop
+        }
+
+
+        $AutoResumeLog =
+            Join-Path `
+                $BasePath `
+                'AutoResume.log'
+
+
+        if (
+            Test-Path `
+                -LiteralPath $AutoResumeLog `
+                -PathType Leaf
+        ) {
+
+            Copy-Item `
+                -LiteralPath $AutoResumeLog `
+                -Destination (
+                    Join-Path `
+                        $DestinationDirectory `
+                        'AutoResume.log'
+                ) `
+                -Force `
+                -ErrorAction Stop
+        }
+
+
+        Write-Host (
+            "Deployment logs copied to: $DestinationDirectory"
+        )
+    }
+    catch {
+
+        # Log copying must never change deployment success/failure.
+        Write-Host (
+            'WARNING: Unable to copy deployment logs to the script ' +
+            "location. Reason: $($_.Exception.Message)"
         )
     }
 }
@@ -1772,6 +1951,8 @@ function Remove-EntireItinoRoot {
     # Close the transcript file handle before deleting its
     # parent C:\ProgramData\Itino directory.
     Stop-ItinoConsoleTranscript
+
+    Copy-ItinoLogsToScriptLocation
 
     Write-Host ''
     Write-Host (
@@ -2970,6 +3151,17 @@ try {
         "Save full console output: $SaveFullConsoleOutput"
     )
 
+
+    Write-Log -Message (
+        "Copy logs to script location: $CopyLogsToScriptLocation"
+    )
+
+    if ($CopyLogsToScriptLocation) {
+        Write-Log -Message (
+            "Copied logs root: $CopiedLogsRoot"
+        )
+    }
+
     if (
         $SaveFullConsoleOutput -and
         $script:ConsoleTranscriptStarted
@@ -4146,6 +4338,8 @@ try {
 
     Stop-ItinoConsoleTranscript
 
+    Copy-ItinoLogsToScriptLocation
+
     Exit-ItinoDeploymentMutex
 
 
@@ -4281,6 +4475,8 @@ catch {
 
 
     Stop-ItinoConsoleTranscript
+
+    Copy-ItinoLogsToScriptLocation
 
     Exit-ItinoDeploymentMutex
 
