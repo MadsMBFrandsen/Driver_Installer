@@ -191,7 +191,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.5.2'
+    '1.5.3'
 
 $ScriptUpdated =
     '2026-08-27'
@@ -8278,6 +8278,119 @@ function Write-LenovoUpdateResult {
 
 
 # ============================================================
+# PHASE 10.8 - COMMON WU -> OEM -> WU SEQUENCE
+# ============================================================
+
+function Invoke-OEMDriverSequence {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$OEMName,
+
+        [Parameter(Mandatory)]
+        [string]$OEMStepName,
+
+        [Parameter(Mandatory)]
+        [scriptblock]$OEMAction,
+
+        [AllowNull()]
+        [scriptblock]$OEMFailureAction,
+
+        [AllowNull()]
+        [scriptblock]$AfterFinalWindowsUpdate
+    )
+
+
+    Write-Log -Message (
+        '============================================================'
+    )
+
+    Write-Log -Message (
+        "$($OEMName.ToUpperInvariant()) STEP 1 - INITIAL WINDOWS UPDATE"
+    )
+
+    Write-Log -Message (
+        '============================================================'
+    )
+
+
+    Invoke-WindowsUpdateDriverUpdate `
+        -PhaseName "$OEMName initial Windows Update" `
+        -MaximumPasses $MaximumWindowsUpdatePasses `
+        -MaximumDownloadRetries $MaximumDownloadAttempts `
+        -PassDelaySeconds $WindowsUpdatePassDelaySeconds `
+        -RetryWaitSeconds $WindowsUpdateRetryWaitSeconds
+
+
+    Write-Log -Message (
+        '============================================================'
+    )
+
+    Write-Log -Message (
+        "$($OEMName.ToUpperInvariant()) STEP 2 - $OEMStepName"
+    )
+
+    Write-Log -Message (
+        '============================================================'
+    )
+
+
+    try {
+
+        & $OEMAction
+    }
+    catch {
+
+        if ($OEMFailureAction) {
+
+            & $OEMFailureAction `
+                $_.Exception
+        }
+        else {
+
+            throw
+        }
+    }
+
+
+    Write-Log -Message (
+        '============================================================'
+    )
+
+    Write-Log -Message (
+        "$($OEMName.ToUpperInvariant()) STEP 3 - FINAL WINDOWS UPDATE"
+    )
+
+    Write-Log -Message (
+        '============================================================'
+    )
+
+
+    Set-OEMFallbackTelemetry `
+        -FinalWindowsUpdateUsed $true
+
+
+    Invoke-WindowsUpdateDriverUpdate `
+        -PhaseName "$OEMName final Windows Update" `
+        -MaximumPasses $MaximumWindowsUpdatePasses `
+        -MaximumDownloadRetries $MaximumDownloadAttempts `
+        -PassDelaySeconds $WindowsUpdatePassDelaySeconds `
+        -RetryWaitSeconds $WindowsUpdateRetryWaitSeconds
+
+
+    if ($AfterFinalWindowsUpdate) {
+
+        & $AfterFinalWindowsUpdate
+    }
+
+
+    Write-Log -Message (
+        "$OEMName driver update sequence completed."
+    )
+}
+
+
+# ============================================================
 # LENOVO COMPLETE FLOW
 # ============================================================
 
@@ -8293,39 +8406,9 @@ function Invoke-LenovoDriverUpdate {
         $false
 
 
-    Write-Log -Message (
-        '============================================================'
-    )
-
-    Write-Log -Message (
-        'LENOVO STEP 1 - INITIAL WINDOWS UPDATE'
-    )
-
-    Write-Log -Message (
-        '============================================================'
-    )
-
-    Invoke-WindowsUpdateDriverUpdate `
-        -PhaseName 'Lenovo initial Windows Update' `
-        -MaximumPasses $MaximumWindowsUpdatePasses `
-        -MaximumDownloadRetries $MaximumDownloadAttempts `
-        -PassDelaySeconds $WindowsUpdatePassDelaySeconds `
-        -RetryWaitSeconds $WindowsUpdateRetryWaitSeconds
-
-    Write-Log -Message (
-        '============================================================'
-    )
-
-    Write-Log -Message (
-        'LENOVO STEP 2 - LSUCLIENT'
-    )
-
-    Write-Log -Message (
-        '============================================================'
-    )
-
     $LSUSucceeded =
         $false
+
 
     try {
 
@@ -8345,6 +8428,7 @@ function Invoke-LenovoDriverUpdate {
             -Level 'WARNING'
     }
 
+
     if (-not $LSUSucceeded) {
 
         $script:LenovoSystemUpdateFallbackUsed =
@@ -8363,11 +8447,21 @@ function Invoke-LenovoDriverUpdate {
             '============================================================'
         )
 
+
         try {
 
             Invoke-LenovoSystemUpdate
         }
         catch {
+
+            Set-OEMFallbackTelemetry `
+                -PrimaryOEMMethodFailed $true `
+                -WindowsUpdateFallbackUsed $true `
+                -Reason (
+                    'LSUClient and Lenovo System Update fallback both failed. ' +
+                    $_.Exception.Message
+                )
+
 
             Write-Log `
                 -Message (
@@ -8386,24 +8480,37 @@ function Invoke-LenovoDriverUpdate {
         )
     }
 
-    Write-Log -Message (
-        '============================================================'
+
+    return [PSCustomObject]@{
+
+        LSUSucceeded =
+            $LSUSucceeded
+
+        CatalogRecoveryUsed =
+            [bool]$script:LenovoCatalogRecoveryUsed
+
+        SystemUpdateFallbackUsed =
+            [bool]$script:LenovoSystemUpdateFallbackUsed
+    }
+}
+
+
+function Complete-LenovoDriverUpdate {
+
+    param(
+        [AllowNull()]
+        [object]$LenovoActionResult
     )
 
-    Write-Log -Message (
-        'LENOVO STEP 3 - FINAL WINDOWS UPDATE'
-    )
 
-    Write-Log -Message (
-        '============================================================'
-    )
+    $LSUSucceeded =
+        if ($LenovoActionResult) {
+            [bool]$LenovoActionResult.LSUSucceeded
+        }
+        else {
+            $false
+        }
 
-    Invoke-WindowsUpdateDriverUpdate `
-        -PhaseName 'Lenovo final Windows Update' `
-        -MaximumPasses $MaximumWindowsUpdatePasses `
-        -MaximumDownloadRetries $MaximumDownloadAttempts `
-        -PassDelaySeconds $WindowsUpdatePassDelaySeconds `
-        -RetryWaitSeconds $WindowsUpdateRetryWaitSeconds
 
     $LenovoRestartRequired =
         Test-Path `
@@ -8442,16 +8549,11 @@ function Invoke-LenovoDriverUpdate {
         -Status $LenovoStatus `
         -RestartRequired $LenovoRestartRequired `
         -Notes (
-            'Phase 10.5 Lenovo reporting. ' +
+            'Phase 10.8 common sequence / Lenovo reporting. ' +
             "LSUSucceeded=$LSUSucceeded; " +
             "CatalogRecoveryUsed=$script:LenovoCatalogRecoveryUsed; " +
             "SystemUpdateFallbackUsed=$script:LenovoSystemUpdateFallbackUsed."
         )
-
-
-    Write-Log -Message (
-        'Lenovo driver update sequence completed.'
-    )
 }
 
 
@@ -8734,6 +8836,8 @@ function Write-OEMUpdateResult {
                         CommonHelper = 'Invoke-ProcessWithTimeout'
                         HelperVersion = 2
                         PowerShell51ExitCodeFinalization = $true
+                        CommonOEMSequence = 'Invoke-OEMDriverSequence'
+                        CommonOEMSequenceVersion = 1
                     }
 
                 Notes =
@@ -9017,216 +9121,106 @@ try {
             # =================================================
             # DELL
             # =================================================
-			'Dell' {
 
-				Write-Log -Message (
-					'Dell system detected.'
-				)
+            'Dell' {
 
+                Write-Log -Message (
+                    'Dell system detected.'
+                )
 
-				Write-Log -Message (
-					'============================================================'
-				)
 
-				Write-Log -Message (
-					'DELL STEP 1 - INITIAL WINDOWS UPDATE'
-				)
+                Invoke-OEMDriverSequence `
+                    -OEMName 'Dell' `
+                    -OEMStepName 'DELL COMMAND UPDATE' `
+                    -OEMAction {
 
-				Write-Log -Message (
-					'============================================================'
-				)
+                        Invoke-DellDriverUpdate
+                    } `
+                    -OEMFailureAction {
 
+                        param(
+                            [System.Exception]$Exception
+                        )
 
-				Invoke-WindowsUpdateDriverUpdate `
-					-PhaseName 'Dell initial Windows Update' `
-					-MaximumPasses $MaximumWindowsUpdatePasses `
-					-MaximumDownloadRetries $MaximumDownloadAttempts `
-					-PassDelaySeconds $WindowsUpdatePassDelaySeconds `
-					-RetryWaitSeconds $WindowsUpdateRetryWaitSeconds
 
+                        $DellFallbackReason =
+                            $Exception.Message
 
-				Write-Log -Message (
-					'============================================================'
-				)
 
-				Write-Log -Message (
-					'DELL STEP 2 - DELL COMMAND UPDATE'
-				)
+                        Set-OEMFallbackTelemetry `
+                            -PrimaryOEMMethodFailed $true `
+                            -WindowsUpdateFallbackUsed $true `
+                            -Reason $DellFallbackReason
 
-				Write-Log -Message (
-					'============================================================'
-				)
 
+                        Write-Log `
+                            -Message (
+                                'Dell Command Update did not complete successfully. ' +
+                                'Continuing with final Windows Update. ' +
+                                "Reason: $DellFallbackReason"
+                            ) `
+                            -Level 'WARNING'
+                    }
 
-				try {
 
-					Invoke-DellDriverUpdate
-				}
-				catch {
+                break
+            }
 
-                    $DellFallbackReason =
-                        $_.Exception.Message
 
+            # =================================================
+            # HP
+            # =================================================
 
-                    Set-OEMFallbackTelemetry `
-                        -PrimaryOEMMethodFailed $true `
-                        -WindowsUpdateFallbackUsed $true `
-                        -Reason $DellFallbackReason
+            'HP|Hewlett-Packard' {
 
+                Write-Log -Message (
+                    'HP system detected.'
+                )
 
-					Write-Log `
-						-Message (
-							'Dell Command Update did not complete successfully. ' +
-							'Continuing with final Windows Update. ' +
-							"Reason: $DellFallbackReason"
-						) `
-						-Level 'WARNING'
-				}
 
+                Invoke-OEMDriverSequence `
+                    -OEMName 'HP' `
+                    -OEMStepName 'HP IMAGE ASSISTANT' `
+                    -OEMAction {
 
-				Write-Log -Message (
-					'============================================================'
-				)
+                        Invoke-HPDriverUpdate
+                    } `
+                    -OEMFailureAction {
 
-				Write-Log -Message (
-					'DELL STEP 3 - FINAL WINDOWS UPDATE'
-				)
+                        param(
+                            [System.Exception]$Exception
+                        )
 
-				Write-Log -Message (
-					'============================================================'
-				)
 
+                        $HPFallbackReason =
+                            $Exception.Message
 
-                Set-OEMFallbackTelemetry `
-                    -FinalWindowsUpdateUsed $true
 
+                        $HPUnavailable =
+                            $HPFallbackReason -match
+                            'was not found|not available|could not be located'
 
-				Invoke-WindowsUpdateDriverUpdate `
-					-PhaseName 'Dell final Windows Update' `
-					-MaximumPasses $MaximumWindowsUpdatePasses `
-					-MaximumDownloadRetries $MaximumDownloadAttempts `
-					-PassDelaySeconds $WindowsUpdatePassDelaySeconds `
-					-RetryWaitSeconds $WindowsUpdateRetryWaitSeconds
 
+                        Set-OEMFallbackTelemetry `
+                            -PrimaryOEMMethodFailed (-not $HPUnavailable) `
+                            -PrimaryOEMMethodUnavailable $HPUnavailable `
+                            -WindowsUpdateFallbackUsed $true `
+                            -Reason $HPFallbackReason
 
-				Write-Log -Message (
-					'Dell driver update sequence completed.'
-				)
 
+                        Write-Log `
+                            -Message (
+                                'HP Image Assistant did not complete successfully. ' +
+                                'Continuing with final Windows Update. ' +
+                                "Reason: $HPFallbackReason"
+                            ) `
+                            -Level 'WARNING'
+                    }
 
-				break
-			}
 
+                break
+            }
 
-			# ============================================================
-			# HP
-			# ============================================================
-
-			'HP|Hewlett-Packard' {
-
-				Write-Log -Message (
-					'HP system detected.'
-				)
-
-
-				Write-Log -Message (
-					'============================================================'
-				)
-
-				Write-Log -Message (
-					'HP STEP 1 - INITIAL WINDOWS UPDATE'
-				)
-
-				Write-Log -Message (
-					'============================================================'
-				)
-
-
-				Invoke-WindowsUpdateDriverUpdate `
-					-PhaseName 'HP initial Windows Update' `
-					-MaximumPasses $MaximumWindowsUpdatePasses `
-					-MaximumDownloadRetries $MaximumDownloadAttempts `
-					-PassDelaySeconds $WindowsUpdatePassDelaySeconds `
-					-RetryWaitSeconds $WindowsUpdateRetryWaitSeconds
-
-
-				Write-Log -Message (
-					'============================================================'
-				)
-
-				Write-Log -Message (
-					'HP STEP 2 - HP IMAGE ASSISTANT'
-				)
-
-				Write-Log -Message (
-					'============================================================'
-				)
-
-
-				try {
-
-					Invoke-HPDriverUpdate
-				}
-				catch {
-
-                    $HPFallbackReason =
-                        $_.Exception.Message
-
-
-                    $HPUnavailable =
-                        $HPFallbackReason -match
-                        'was not found|not available|could not be located'
-
-
-                    Set-OEMFallbackTelemetry `
-                        -PrimaryOEMMethodFailed (-not $HPUnavailable) `
-                        -PrimaryOEMMethodUnavailable $HPUnavailable `
-                        -WindowsUpdateFallbackUsed $true `
-                        -Reason $HPFallbackReason
-
-
-					Write-Log `
-						-Message (
-							'HP Image Assistant did not complete successfully. ' +
-							'Continuing with final Windows Update. ' +
-							"Reason: $HPFallbackReason"
-						) `
-						-Level 'WARNING'
-				}
-
-
-				Write-Log -Message (
-					'============================================================'
-				)
-
-				Write-Log -Message (
-					'HP STEP 3 - FINAL WINDOWS UPDATE'
-				)
-
-				Write-Log -Message (
-					'============================================================'
-				)
-
-
-                Set-OEMFallbackTelemetry `
-                    -FinalWindowsUpdateUsed $true
-
-
-				Invoke-WindowsUpdateDriverUpdate `
-					-PhaseName 'HP final Windows Update' `
-					-MaximumPasses $MaximumWindowsUpdatePasses `
-					-MaximumDownloadRetries $MaximumDownloadAttempts `
-					-PassDelaySeconds $WindowsUpdatePassDelaySeconds `
-					-RetryWaitSeconds $WindowsUpdateRetryWaitSeconds
-
-
-				Write-Log -Message (
-					'HP driver update sequence completed.'
-				)
-
-
-				break
-			}
 
             # =================================================
             # LENOVO
@@ -9239,7 +9233,23 @@ try {
                 )
 
 
-                Invoke-LenovoDriverUpdate
+                $LenovoActionResult =
+                    $null
+
+
+                Invoke-OEMDriverSequence `
+                    -OEMName 'Lenovo' `
+                    -OEMStepName 'LSUCLIENT' `
+                    -OEMAction {
+
+                        $script:LenovoPhase108Result =
+                            Invoke-LenovoDriverUpdate
+                    } `
+                    -AfterFinalWindowsUpdate {
+
+                        Complete-LenovoDriverUpdate `
+                            -LenovoActionResult $script:LenovoPhase108Result
+                    }
 
 
                 break
