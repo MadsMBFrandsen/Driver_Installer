@@ -44,6 +44,32 @@
 [CmdletBinding()]
 param()
 
+# ============================================================
+# PHASE 10.9 - SHARED COMMON HELPERS
+# ============================================================
+
+$ItinoCommonHelperPath =
+    Join-Path `
+        $PSScriptRoot `
+        'Common\Itino-DriverCommon.ps1'
+
+
+if (-not (
+    Test-Path `
+        -LiteralPath $ItinoCommonHelperPath `
+        -PathType Leaf
+)) {
+
+    throw (
+        'Required ITINO shared helper file was not found: ' +
+        $ItinoCommonHelperPath
+    )
+}
+
+
+. $ItinoCommonHelperPath
+
+
 $ErrorActionPreference =
     'Stop'
 
@@ -173,32 +199,6 @@ if ($WriteLogFiles) {
 # ============================================================
 # LOGGING
 # ============================================================
-
-# ============================================================
-# PHASE 10.9 - SHARED COMMON HELPERS
-# ============================================================
-
-$ItinoCommonHelperPath =
-    Join-Path `
-        $PSScriptRoot `
-        'Common\Itino-DriverCommon.ps1'
-
-
-if (-not (
-    Test-Path `
-        -LiteralPath $ItinoCommonHelperPath `
-        -PathType Leaf
-)) {
-
-    throw (
-        'Required ITINO shared helper file was not found: ' +
-        $ItinoCommonHelperPath
-    )
-}
-
-
-. $ItinoCommonHelperPath
-
 
 function Write-Log {
 
