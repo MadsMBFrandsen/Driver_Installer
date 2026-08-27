@@ -191,7 +191,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.4.6'
+    '1.4.7'
 
 $ScriptUpdated =
     '2026-08-27'
@@ -4101,9 +4101,9 @@ function Invoke-DellDriverUpdate {
 # ============================================================
 function Get-HPImageAssistantPath {
 
-    # Phase 10.1:
-    # Prefer the permanent HPIA location. Keep the deployment
-    # working-tree paths as migration/fallback compatibility.
+    # ========================================================
+    # PHASE 10.1 - PERMANENT HPIA PREFERENCE
+    # ========================================================
 
     $Candidates =
         @(
@@ -4151,6 +4151,8 @@ function Get-HPImageAssistantPath {
 
     return $null
 }
+
+
 
 function Get-HPIAOutputFiles {
 
@@ -7148,6 +7150,312 @@ $RunID =
     $null
 
 
+# ============================================================
+# PHASE 10.2 - COMMON OEM UPDATE RESULT
+# ============================================================
+
+$OEMUpdateResultFile =
+    Join-Path `
+        $WorkingPath `
+        'OEMUpdateResult.json'
+
+
+function Get-CurrentOEMToolName {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$Manufacturer
+    )
+
+
+    switch -Regex ($Manufacturer) {
+
+        'Dell' {
+            return 'Dell Command Update'
+        }
+
+        'HP|Hewlett' {
+            return 'HP Image Assistant'
+        }
+
+        'Lenovo' {
+            return 'Lenovo LSUClient'
+        }
+
+        default {
+            return 'Windows Update'
+        }
+    }
+}
+
+
+function Get-CurrentOEMToolVersion {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$Manufacturer
+    )
+
+
+    try {
+
+        switch -Regex ($Manufacturer) {
+
+            'Dell' {
+
+                foreach (
+                    $Candidate in @(
+                        'C:\Program Files\Dell\CommandUpdate\dcu-cli.exe'
+                        'C:\Program Files (x86)\Dell\CommandUpdate\dcu-cli.exe'
+                    )
+                ) {
+
+                    if (
+                        Test-Path `
+                            -LiteralPath $Candidate `
+                            -PathType Leaf
+                    ) {
+
+                        return (
+                            Get-Item `
+                                -LiteralPath $Candidate
+                        ).VersionInfo.FileVersion
+                    }
+                }
+            }
+
+
+            'HP|Hewlett' {
+
+                $HPExecutable =
+                    Get-HPImageAssistantPath
+
+
+                if (
+                    $HPExecutable -and
+                    (
+                        Test-Path `
+                            -LiteralPath $HPExecutable `
+                            -PathType Leaf
+                    )
+                ) {
+
+                    return (
+                        Get-Item `
+                            -LiteralPath $HPExecutable
+                    ).VersionInfo.FileVersion
+                }
+            }
+
+
+            'Lenovo' {
+
+                $LSUModule =
+                    Get-Module `
+                        -ListAvailable `
+                        -Name 'LSUClient' `
+                        -ErrorAction SilentlyContinue |
+                    Sort-Object Version -Descending |
+                    Select-Object -First 1
+
+
+                if ($LSUModule) {
+
+                    return [string]$LSUModule.Version
+                }
+            }
+        }
+    }
+    catch {
+
+        Write-Log `
+            -Message (
+                'Unable to determine OEM update tool version. ' +
+                "Reason: $($_.Exception.Message)"
+            ) `
+            -Level 'WARNING'
+    }
+
+
+    return $null
+}
+
+
+function Write-OEMUpdateResult {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$Manufacturer,
+
+        [Parameter(Mandatory)]
+        [string]$Status,
+
+        [Parameter(Mandatory)]
+        [bool]$RestartRequired,
+
+        [Parameter(Mandatory)]
+        [int]$ExitCode,
+
+        [AllowNull()]
+        [Nullable[int]]$Recommendations,
+
+        [AllowNull()]
+        [Nullable[int]]$Downloaded,
+
+        [AllowNull()]
+        [Nullable[int]]$Installed,
+
+        [AllowNull()]
+        [Nullable[int]]$Failed,
+
+        [AllowNull()]
+        [string]$Notes
+    )
+
+
+    try {
+
+        if (-not (
+            Test-Path -LiteralPath $WorkingPath
+        )) {
+
+            New-Item `
+                -Path $WorkingPath `
+                -ItemType Directory `
+                -Force |
+            Out-Null
+        }
+
+
+        $ToolName =
+            Get-CurrentOEMToolName `
+                -Manufacturer $Manufacturer
+
+
+        $ToolVersion =
+            Get-CurrentOEMToolVersion `
+                -Manufacturer $Manufacturer
+
+
+        if (
+            $Manufacturer -match
+            'HP|Hewlett'
+        ) {
+
+            $HPDownloadFolder =
+                Join-Path `
+                    $WorkingPath `
+                    'HP\Downloads'
+
+
+            if (
+                $null -eq $Downloaded -and
+                (
+                    Test-Path -LiteralPath $HPDownloadFolder
+                )
+            ) {
+
+                $Downloaded =
+                    @(
+                        Get-ChildItem `
+                            -LiteralPath $HPDownloadFolder `
+                            -Filter 'sp*.exe' `
+                            -File `
+                            -Recurse `
+                            -ErrorAction SilentlyContinue
+                    ).Count
+            }
+        }
+
+
+        $Result =
+            [PSCustomObject]@{
+
+                SchemaVersion =
+                    1
+
+                GeneratedTime =
+                    Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+                ComputerName =
+                    $env:COMPUTERNAME
+
+                Manufacturer =
+                    $Manufacturer
+
+                Tool =
+                    $ToolName
+
+                ToolVersion =
+                    $ToolVersion
+
+                Status =
+                    $Status
+
+                Recommendations =
+                    $Recommendations
+
+                Downloaded =
+                    $Downloaded
+
+                Installed =
+                    $Installed
+
+                Failed =
+                    $Failed
+
+                RestartRequired =
+                    $RestartRequired
+
+                ExitCode =
+                    $ExitCode
+
+                Verification =
+                    $null
+
+                Notes =
+                    $Notes
+            }
+
+
+        $Result |
+            ConvertTo-Json `
+                -Depth 8 |
+            Set-Content `
+                -LiteralPath $OEMUpdateResultFile `
+                -Encoding UTF8
+
+
+        Write-Log -Message (
+            "Common OEM update result saved to '$OEMUpdateResultFile'."
+        )
+
+
+        Write-Log -Message (
+            'OEM UPDATE RESULT: ' +
+            "Manufacturer=$Manufacturer | " +
+            "Tool=$ToolName | " +
+            "Version=$ToolVersion | " +
+            "Status=$Status | " +
+            "RestartRequired=$RestartRequired | " +
+            "ExitCode=$ExitCode"
+        )
+    }
+    catch {
+
+        # Result reporting must never turn an otherwise working
+        # driver deployment into a hard failure.
+
+        Write-Log `
+            -Message (
+                'Unable to write common OEM update result. ' +
+                "Reason: $($_.Exception.Message)"
+            ) `
+            -Level 'WARNING'
+    }
+}
+
+
 try {
 
     # ========================================================
@@ -7604,6 +7912,45 @@ try {
     # ========================================================
     # RESTART REQUIRED
     # ========================================================
+    # ========================================================
+    # PHASE 10.2 - WRITE COMMON OEM RESULT
+    # ========================================================
+
+    $OEMRestartRequired =
+        Test-Path `
+            -LiteralPath $RestartFile
+
+
+    $OEMExitCode =
+        if ($OEMRestartRequired) {
+            3010
+        }
+        else {
+            0
+        }
+
+
+    $OEMStatus =
+        if ($OEMRestartRequired) {
+            'SuccessRestartRequired'
+        }
+        else {
+            'Success'
+        }
+
+
+    Write-OEMUpdateResult `
+        -Manufacturer $Manufacturer `
+        -Status $OEMStatus `
+        -RestartRequired $OEMRestartRequired `
+        -ExitCode $OEMExitCode `
+        -Recommendations $null `
+        -Downloaded $null `
+        -Installed $null `
+        -Failed 0 `
+        -Notes 'Phase 10.2 normalized OEM result written by 03-Update-Drivers.ps1.'
+
+
 
     if (
         Test-Path -LiteralPath $RestartFile
@@ -7683,6 +8030,5 @@ catch {
 
     exit 1
 }
-
 
 

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Verifies device driver state after driver installation.
 
@@ -17,7 +17,6 @@
         - Preserves or creates RestartRequired.txt when required
         - Saves DriverVerification.json
         - Inventories installed Dell, HP and Lenovo driver-management tools
-        - Phase 10.1: Prefers permanent HP Image Assistant and falls back to deployment-prepared paths
 
     Logging is controlled by Run-DriverDeployment.ps1 through:
 
@@ -126,6 +125,20 @@ $LogPath =
     Join-Path `
         $BasePath `
         'Logs'
+
+
+# ============================================================
+# PHASE 10.2 - OEM UPDATE RESULT VERIFICATION
+# ============================================================
+
+$OEMUpdateResultFile =
+    Join-Path `
+        (
+            Join-Path `
+                $BasePath `
+                'DriverUpdates'
+        ) `
+        'OEMUpdateResult.json'
 
 
 $HardwareFile =
@@ -1159,16 +1172,7 @@ function Find-FirstExistingFile {
 function Find-HPImageAssistant {
 
     # ========================================================
-    # PHASE 10.0 - HPIA DETECTION CONSISTENCY
-    #
-    # Detection order:
-    #   1. Permanent HPIA location used by Phase 10.1
-    #   2. Other known Program Files HPIA locations
-    #   3. Current temporary location prepared by script 02
-    #   4. Older ITINO / HP fallback locations
-    #
-    # Exact executable paths are checked first so verification
-    # reports the same HPIA instance that 02 and 03 actually use.
+    # PHASE 10.1 - PERMANENT HPIA DETECTION
     # ========================================================
 
     $ExactCandidates =
@@ -1216,14 +1220,6 @@ function Find-HPImageAssistant {
         }
     }
 
-
-    # ========================================================
-    # RECURSIVE FALLBACK
-    #
-    # This is intentionally secondary. It keeps compatibility
-    # with older/non-standard HPIA extraction layouts without
-    # overriding the preferred exact paths above.
-    # ========================================================
 
     $FallbackRoots =
         @(
@@ -1286,13 +1282,14 @@ function Find-HPImageAssistant {
         }
         catch {
 
-            # Inventory detection must remain best-effort.
+            # Best-effort inventory only.
         }
     }
 
 
     return $null
 }
+
 
 
 function Get-LSUClientInventory {
@@ -1765,6 +1762,60 @@ try {
             "Version=$VersionText | " +
             "Path=$PathText"
         )
+    }
+
+
+    # ========================================================
+    # PHASE 10.2 - READ NORMALIZED OEM UPDATE RESULT
+    # ========================================================
+
+    $OEMUpdateResult =
+        $null
+
+
+    if (
+        Test-Path `
+            -LiteralPath $OEMUpdateResultFile `
+            -PathType Leaf
+    ) {
+
+        try {
+
+            $OEMUpdateResult =
+                Get-Content `
+                    -LiteralPath $OEMUpdateResultFile `
+                    -Raw `
+                    -ErrorAction Stop |
+                ConvertFrom-Json
+
+
+            Write-Log -Message (
+                'OEM update result loaded: ' +
+                "Manufacturer=$($OEMUpdateResult.Manufacturer) | " +
+                "Tool=$($OEMUpdateResult.Tool) | " +
+                "Status=$($OEMUpdateResult.Status) | " +
+                "RestartRequired=$($OEMUpdateResult.RestartRequired) | " +
+                "ExitCode=$($OEMUpdateResult.ExitCode)"
+            )
+        }
+        catch {
+
+            Write-Log `
+                -Message (
+                    'Unable to read OEMUpdateResult.json. ' +
+                    "Reason: $($_.Exception.Message)"
+                ) `
+                -Level 'WARNING'
+        }
+    }
+    else {
+
+        Write-Log `
+            -Message (
+                'OEMUpdateResult.json was not found. ' +
+                'Verification will continue without normalized OEM result data.'
+            ) `
+            -Level 'WARNING'
     }
 
 
@@ -2417,6 +2468,127 @@ try {
 
 
     # ========================================================
+    # PHASE 10.2 - ENRICH OEM RESULT WITH VERIFICATION
+    # ========================================================
+
+    if ($OEMUpdateResult) {
+
+        try {
+
+            $ChangedCount =
+                @(
+                    $DriverComparison.Changed
+                ).Count
+
+
+            $AddedCount =
+                @(
+                    $DriverComparison.Added
+                ).Count
+
+
+            $RemovedCount =
+                @(
+                    $DriverComparison.Removed
+                ).Count
+
+
+            $OEMUpdateResult.Verification =
+                [PSCustomObject]@{
+
+                    Status =
+                        $Status
+
+                    DeviceErrorsBefore =
+                        $BeforeCount
+
+                    DeviceErrorsAfter =
+                        $AfterCount
+
+                    FixedDeviceErrors =
+                        $FixedCount
+
+                    RemainingDeviceErrors =
+                        $RemainingCount
+
+                    NewDeviceErrors =
+                        $NewCount
+
+                    DriverChanged =
+                        $ChangedCount
+
+                    DriverAdded =
+                        $AddedCount
+
+                    DriverRemoved =
+                        $RemovedCount
+
+                    RestartRequired =
+                        $RestartRequired
+                }
+
+
+            if (
+                $OEMUpdateResult.Status -eq 'Success' -and
+                -not $RestartRequired -and
+                $ChangedCount -eq 0 -and
+                $AddedCount -eq 0 -and
+                $RemovedCount -eq 0 -and
+                $RemainingCount -eq 0 -and
+                $NewCount -eq 0
+            ) {
+
+                $OEMUpdateResult.Status =
+                    'SuccessNoUpdates'
+            }
+
+
+            if ($RestartRequired) {
+
+                $OEMUpdateResult.RestartRequired =
+                    $true
+
+
+                if (
+                    $OEMUpdateResult.Status -match
+                    '^Success'
+                ) {
+
+                    $OEMUpdateResult.Status =
+                        'SuccessRestartRequired'
+                }
+            }
+
+
+            $OEMUpdateResult |
+                ConvertTo-Json `
+                    -Depth 10 |
+                Set-Content `
+                    -LiteralPath $OEMUpdateResultFile `
+                    -Encoding UTF8
+
+
+            Write-Log -Message (
+                'OEM update result enriched by verification. ' +
+                "FinalStatus=$($OEMUpdateResult.Status); " +
+                "Changed=$ChangedCount; " +
+                "Added=$AddedCount; " +
+                "Removed=$RemovedCount."
+            )
+        }
+        catch {
+
+            Write-Log `
+                -Message (
+                    'Unable to enrich OEMUpdateResult.json. ' +
+                    "Reason: $($_.Exception.Message)"
+                ) `
+                -Level 'WARNING'
+        }
+    }
+
+
+    # ========================================================
     # VERIFICATION REPORT
     # ========================================================
 
@@ -2554,6 +2726,10 @@ try {
                 @(
                     $OEMToolInventory
                 )
+
+
+            OEMUpdateResult =
+                $OEMUpdateResult
         }
 
 

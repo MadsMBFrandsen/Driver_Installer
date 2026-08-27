@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Runs the complete ITINO Driver Check And Update workflow.
 
@@ -563,6 +563,20 @@ $RestartFile =
     Join-Path `
         $BasePath `
         'RestartRequired.txt'
+
+
+# ============================================================
+# PHASE 10.2 - COMMON OEM UPDATE RESULT
+# ============================================================
+
+$OEMUpdateResultFile =
+    Join-Path `
+        (
+            Join-Path `
+                $BasePath `
+                'DriverUpdates'
+        ) `
+        'OEMUpdateResult.json'
 
 
 $SummaryFile =
@@ -3035,6 +3049,37 @@ try {
         }
     }
 
+    $OEMUpdateSummary =
+        $null
+
+
+    if (
+        Test-Path `
+            -LiteralPath $OEMUpdateResultFile `
+            -PathType Leaf
+    ) {
+
+        try {
+
+            $OEMUpdateSummary =
+                Get-Content `
+                    -LiteralPath $OEMUpdateResultFile `
+                    -Raw `
+                    -ErrorAction Stop |
+                ConvertFrom-Json
+        }
+        catch {
+
+            Write-Log `
+                -Message (
+                    'Unable to load OEMUpdateResult.json for deployment summary. ' +
+                    "Reason: $($_.Exception.Message)"
+                ) `
+                -Level 'WARNING'
+        }
+    }
+
+
     $VerificationSummary = $null
     $DriverChangesSummary = $null
     $DriverSnapshotsSummary = $null
@@ -3153,6 +3198,7 @@ try {
             DriverChanges = $DriverChangesSummary
             DriverSnapshots = $DriverSnapshotsSummary
             OEMTools = @($OEMToolsSummary)
+            OEMUpdateResult = $OEMUpdateSummary
             RestartReasons = @($RestartReasons)
         }
 
@@ -3225,6 +3271,23 @@ try {
         Write-Host "Fixed            : $($VerificationSummary.FixedDeviceErrors)"
         Write-Host "Remaining        : $($VerificationSummary.RemainingDeviceErrors)"
     }
+
+    if ($OEMUpdateSummary) {
+
+        Write-Host ''
+        Write-Host 'OEM Update'
+        Write-Host "Manufacturer     : $($OEMUpdateSummary.Manufacturer)"
+        Write-Host "Tool             : $($OEMUpdateSummary.Tool)"
+        Write-Host "Tool Version     : $($OEMUpdateSummary.ToolVersion)"
+        Write-Host "Status           : $($OEMUpdateSummary.Status)"
+        Write-Host "Recommendations  : $($OEMUpdateSummary.Recommendations)"
+        Write-Host "Downloaded       : $($OEMUpdateSummary.Downloaded)"
+        Write-Host "Installed        : $($OEMUpdateSummary.Installed)"
+        Write-Host "Failed           : $($OEMUpdateSummary.Failed)"
+        Write-Host "Restart Required : $($OEMUpdateSummary.RestartRequired)"
+        Write-Host "Exit Code        : $($OEMUpdateSummary.ExitCode)"
+    }
+
 
     if ($DriverChangesSummary) {
         Write-Host ''
