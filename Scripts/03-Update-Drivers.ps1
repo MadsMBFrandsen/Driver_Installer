@@ -191,7 +191,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.5.4'
+    '1.5.5'
 
 $ScriptUpdated =
     '2026-08-27'
@@ -3021,43 +3021,14 @@ function Set-OEMFallbackTelemetry {
 
 
 # ============================================================
-# WINDOWS UPDATE FALLBACK
+# WINDOWS UPDATE / FALLBACK
 # ============================================================
-
-function Invoke-WindowsUpdateFallback {
-
-    param(
-        [Parameter(Mandatory)]
-        [string]$OEMName,
-
-        [Parameter(Mandatory)]
-        [string]$Reason
-    )
-
-
-    Set-OEMFallbackTelemetry `
-        -PrimaryOEMMethodFailed $true `
-        -WindowsUpdateFallbackUsed $true `
-        -Reason $Reason
-
-
-    Write-Log `
-        -Message (
-            "$OEMName OEM update method could not be used. " +
-            'Falling back to Windows Update. ' +
-            "Reason: $Reason"
-        ) `
-        -Level 'WARNING'
-
-
-    Invoke-WindowsUpdateDriverUpdate `
-        -PhaseName "$OEMName Windows Update fallback" `
-        -MaximumPasses $MaximumWindowsUpdatePasses `
-        -MaximumDownloadRetries $MaximumDownloadAttempts `
-        -PassDelaySeconds $WindowsUpdatePassDelaySeconds `
-        -RetryWaitSeconds $WindowsUpdateRetryWaitSeconds
-}
-
+#
+# Phase 10.13:
+# The old unused Invoke-WindowsUpdateFallback wrapper was removed.
+# OEM fallback handling now goes through Invoke-OEMDriverSequence
+# plus Set-OEMFallbackTelemetry.
+# ============================================================
 
 # ============================================================
 # DELL COMMAND UPDATE
@@ -6952,110 +6923,6 @@ function Test-LenovoCatalogPackageUrl {
             StatusCode = $StatusCode
             Error = $_.Exception.Message
         }
-    }
-}
-
-
-function New-LenovoFilteredCatalog {
-
-    param(
-        [Parameter(Mandatory)]
-        [string]$OriginalCatalogPath,
-
-        [Parameter(Mandatory)]
-        [string]$FilteredCatalogPath
-    )
-
-    $CatalogXml =
-        New-Object System.Xml.XmlDocument
-
-    $CatalogXml.PreserveWhitespace =
-        $true
-
-    $CatalogXml.Load(
-        $OriginalCatalogPath
-    )
-
-    $PackageNodes =
-        @(
-            $CatalogXml.SelectNodes(
-                '/packages/package'
-            )
-        )
-
-    $Removed =
-        @()
-
-    foreach (
-        $PackageNode in $PackageNodes
-    ) {
-
-        $LocationNode =
-            $PackageNode.SelectSingleNode(
-                'location'
-            )
-
-        if (-not $LocationNode) {
-            continue
-        }
-
-        $Url =
-            $LocationNode.InnerText.Trim()
-
-        if (
-            [string]::IsNullOrWhiteSpace(
-                $Url
-            )
-        ) {
-            continue
-        }
-
-        $Result =
-            Test-LenovoCatalogPackageUrl `
-                -Url $Url
-
-        if (-not $Result.Success) {
-
-            $Removed +=
-                [PSCustomObject]@{
-                    Url = $Url
-                    StatusCode = $Result.StatusCode
-                    Error = $Result.Error
-                }
-
-            [void]$PackageNode.ParentNode.RemoveChild(
-                $PackageNode
-            )
-        }
-    }
-
-    $Remaining =
-        @(
-            $CatalogXml.SelectNodes(
-                '/packages/package'
-            )
-        )
-
-    if (
-        $CatalogXml.DocumentElement -and
-        $CatalogXml.DocumentElement.HasAttribute(
-            'count'
-        )
-    ) {
-
-        $CatalogXml.DocumentElement.SetAttribute(
-            'count',
-            [string]$Remaining.Count
-        )
-    }
-
-    $CatalogXml.Save(
-        $FilteredCatalogPath
-    )
-
-    return [PSCustomObject]@{
-        Removed = $Removed
-        RemainingCount = $Remaining.Count
     }
 }
 
