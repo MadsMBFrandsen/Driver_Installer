@@ -191,7 +191,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.5.0'
+    '1.5.1'
 
 $ScriptUpdated =
     '2026-08-27'
@@ -218,6 +218,20 @@ $script:LenovoCatalogRecoveryUsed =
 
 $script:LenovoSystemUpdateFallbackUsed =
     $false
+
+
+# Phase 10.6 common fallback telemetry.
+$script:OEMFallbackTelemetry =
+    [PSCustomObject]@{
+        ForceWindowsUpdate = $false
+        PrimaryOEMMethodFailed = $false
+        PrimaryOEMMethodUnavailable = $false
+        WindowsUpdateFallbackUsed = $false
+        FinalWindowsUpdateUsed = $false
+        CatalogRecoveryUsed = $false
+        SystemUpdateFallbackUsed = $false
+        Reason = $null
+    }
 
 
 # ============================================================
@@ -2967,6 +2981,69 @@ function Invoke-WindowsUpdateDriverUpdate {
 }
 
 
+function Set-OEMFallbackTelemetry {
+
+    param(
+        [AllowNull()]
+        [Nullable[bool]]$ForceWindowsUpdate,
+
+        [AllowNull()]
+        [Nullable[bool]]$PrimaryOEMMethodFailed,
+
+        [AllowNull()]
+        [Nullable[bool]]$PrimaryOEMMethodUnavailable,
+
+        [AllowNull()]
+        [Nullable[bool]]$WindowsUpdateFallbackUsed,
+
+        [AllowNull()]
+        [Nullable[bool]]$FinalWindowsUpdateUsed,
+
+        [AllowNull()]
+        [Nullable[bool]]$CatalogRecoveryUsed,
+
+        [AllowNull()]
+        [Nullable[bool]]$SystemUpdateFallbackUsed,
+
+        [AllowNull()]
+        [string]$Reason
+    )
+
+
+    if ($null -ne $ForceWindowsUpdate) {
+        $script:OEMFallbackTelemetry.ForceWindowsUpdate = $ForceWindowsUpdate
+    }
+
+    if ($null -ne $PrimaryOEMMethodFailed) {
+        $script:OEMFallbackTelemetry.PrimaryOEMMethodFailed = $PrimaryOEMMethodFailed
+    }
+
+    if ($null -ne $PrimaryOEMMethodUnavailable) {
+        $script:OEMFallbackTelemetry.PrimaryOEMMethodUnavailable = $PrimaryOEMMethodUnavailable
+    }
+
+    if ($null -ne $WindowsUpdateFallbackUsed) {
+        $script:OEMFallbackTelemetry.WindowsUpdateFallbackUsed = $WindowsUpdateFallbackUsed
+    }
+
+    if ($null -ne $FinalWindowsUpdateUsed) {
+        $script:OEMFallbackTelemetry.FinalWindowsUpdateUsed = $FinalWindowsUpdateUsed
+    }
+
+    if ($null -ne $CatalogRecoveryUsed) {
+        $script:OEMFallbackTelemetry.CatalogRecoveryUsed = $CatalogRecoveryUsed
+    }
+
+    if ($null -ne $SystemUpdateFallbackUsed) {
+        $script:OEMFallbackTelemetry.SystemUpdateFallbackUsed = $SystemUpdateFallbackUsed
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Reason)) {
+        $script:OEMFallbackTelemetry.Reason = $Reason
+    }
+}
+
+
 # ============================================================
 # WINDOWS UPDATE FALLBACK
 # ============================================================
@@ -2980,6 +3057,12 @@ function Invoke-WindowsUpdateFallback {
         [Parameter(Mandatory)]
         [string]$Reason
     )
+
+
+    Set-OEMFallbackTelemetry `
+        -PrimaryOEMMethodFailed $true `
+        -WindowsUpdateFallbackUsed $true `
+        -Reason $Reason
 
 
     Write-Log `
@@ -8372,6 +8455,13 @@ function Invoke-LenovoDriverUpdate {
         }
 
 
+    Set-OEMFallbackTelemetry `
+        -CatalogRecoveryUsed $script:LenovoCatalogRecoveryUsed `
+        -SystemUpdateFallbackUsed $script:LenovoSystemUpdateFallbackUsed `
+        -WindowsUpdateFallbackUsed $script:LenovoSystemUpdateFallbackUsed `
+        -FinalWindowsUpdateUsed $true
+
+
     Write-LenovoUpdateResult `
         -Status $LenovoStatus `
         -RestartRequired $LenovoRestartRequired `
@@ -8660,6 +8750,9 @@ function Write-OEMUpdateResult {
                 Verification =
                     $null
 
+                FallbackTelemetry =
+                    $script:OEMFallbackTelemetry
+
                 Notes =
                     $Notes
             }
@@ -8686,6 +8779,18 @@ function Write-OEMUpdateResult {
             "Status=$Status | " +
             "RestartRequired=$RestartRequired | " +
             "ExitCode=$ExitCode"
+        )
+
+
+        Write-Log -Message (
+            'OEM FALLBACK TELEMETRY: ' +
+            "ForceWU=$($script:OEMFallbackTelemetry.ForceWindowsUpdate) | " +
+            "PrimaryFailed=$($script:OEMFallbackTelemetry.PrimaryOEMMethodFailed) | " +
+            "PrimaryUnavailable=$($script:OEMFallbackTelemetry.PrimaryOEMMethodUnavailable) | " +
+            "WUFallback=$($script:OEMFallbackTelemetry.WindowsUpdateFallbackUsed) | " +
+            "FinalWU=$($script:OEMFallbackTelemetry.FinalWindowsUpdateUsed) | " +
+            "CatalogRecovery=$($script:OEMFallbackTelemetry.CatalogRecoveryUsed) | " +
+            "SystemUpdateFallback=$($script:OEMFallbackTelemetry.SystemUpdateFallbackUsed)"
         )
     }
     catch {
@@ -8895,6 +9000,12 @@ try {
 
     if ($ForceWindowsUpdate) {
 
+        Set-OEMFallbackTelemetry `
+            -ForceWindowsUpdate $true `
+            -WindowsUpdateFallbackUsed $true `
+            -Reason 'ForceWindowsUpdate setting bypassed the OEM update method.'
+
+
         Write-Log `
             -Message (
                 'ForceWindowsUpdate is enabled. ' +
@@ -8970,11 +9081,21 @@ try {
 				}
 				catch {
 
+                    $DellFallbackReason =
+                        $_.Exception.Message
+
+
+                    Set-OEMFallbackTelemetry `
+                        -PrimaryOEMMethodFailed $true `
+                        -WindowsUpdateFallbackUsed $true `
+                        -Reason $DellFallbackReason
+
+
 					Write-Log `
 						-Message (
 							'Dell Command Update did not complete successfully. ' +
 							'Continuing with final Windows Update. ' +
-							"Reason: $($_.Exception.Message)"
+							"Reason: $DellFallbackReason"
 						) `
 						-Level 'WARNING'
 				}
@@ -8991,6 +9112,10 @@ try {
 				Write-Log -Message (
 					'============================================================'
 				)
+
+
+                Set-OEMFallbackTelemetry `
+                    -FinalWindowsUpdateUsed $true
 
 
 				Invoke-WindowsUpdateDriverUpdate `
@@ -9061,11 +9186,27 @@ try {
 				}
 				catch {
 
+                    $HPFallbackReason =
+                        $_.Exception.Message
+
+
+                    $HPUnavailable =
+                        $HPFallbackReason -match
+                        'was not found|not available|could not be located'
+
+
+                    Set-OEMFallbackTelemetry `
+                        -PrimaryOEMMethodFailed (-not $HPUnavailable) `
+                        -PrimaryOEMMethodUnavailable $HPUnavailable `
+                        -WindowsUpdateFallbackUsed $true `
+                        -Reason $HPFallbackReason
+
+
 					Write-Log `
 						-Message (
 							'HP Image Assistant did not complete successfully. ' +
 							'Continuing with final Windows Update. ' +
-							"Reason: $($_.Exception.Message)"
+							"Reason: $HPFallbackReason"
 						) `
 						-Level 'WARNING'
 				}
@@ -9082,6 +9223,10 @@ try {
 				Write-Log -Message (
 					'============================================================'
 				)
+
+
+                Set-OEMFallbackTelemetry `
+                    -FinalWindowsUpdateUsed $true
 
 
 				Invoke-WindowsUpdateDriverUpdate `
@@ -9123,6 +9268,14 @@ try {
             # =================================================
 
             default {
+
+                Set-OEMFallbackTelemetry `
+                    -PrimaryOEMMethodUnavailable $true `
+                    -WindowsUpdateFallbackUsed $true `
+                    -Reason (
+                        "No configured OEM update method for manufacturer '$Manufacturer'."
+                    )
+
 
                 Write-Log `
                     -Message (

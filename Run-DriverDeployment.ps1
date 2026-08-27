@@ -3286,6 +3286,25 @@ try {
         Write-Host "Failed           : $($OEMUpdateSummary.Failed)"
         Write-Host "Restart Required : $($OEMUpdateSummary.RestartRequired)"
         Write-Host "Exit Code        : $($OEMUpdateSummary.ExitCode)"
+
+
+        if ($OEMUpdateSummary.FallbackTelemetry) {
+
+            Write-Host "WU Fallback      : $($OEMUpdateSummary.FallbackTelemetry.WindowsUpdateFallbackUsed)"
+            Write-Host "OEM Failed       : $($OEMUpdateSummary.FallbackTelemetry.PrimaryOEMMethodFailed)"
+            Write-Host "OEM Unavailable  : $($OEMUpdateSummary.FallbackTelemetry.PrimaryOEMMethodUnavailable)"
+            Write-Host "Catalog Recovery : $($OEMUpdateSummary.FallbackTelemetry.CatalogRecoveryUsed)"
+            Write-Host "SystemUpdate FB  : $($OEMUpdateSummary.FallbackTelemetry.SystemUpdateFallbackUsed)"
+
+            if (
+                -not [string]::IsNullOrWhiteSpace(
+                    [string]$OEMUpdateSummary.FallbackTelemetry.Reason
+                )
+            ) {
+
+                Write-Host "Fallback Reason  : $($OEMUpdateSummary.FallbackTelemetry.Reason)"
+            }
+        }
     }
 
 
