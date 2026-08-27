@@ -3178,6 +3178,200 @@ try {
                 }
         }
 
+    # ========================================================
+    # PHASE 10.11 - NORMALIZED FINAL DEPLOYMENT SUMMARY
+    # ========================================================
+
+    $FinalVerificationStatus =
+        if (
+            $VerificationV2Summary -and
+            $VerificationV2Summary.OverallStatus
+        ) {
+            [string]$VerificationV2Summary.OverallStatus
+        }
+        elseif (
+            $VerificationSummary -and
+            $VerificationSummary.Status
+        ) {
+            [string]$VerificationSummary.Status
+        }
+        else {
+            'Unknown'
+        }
+
+
+    $FinalOEMStatus =
+        if (
+            $OEMUpdateSummary -and
+            $OEMUpdateSummary.Status
+        ) {
+            [string]$OEMUpdateSummary.Status
+        }
+        else {
+            'NotAvailable'
+        }
+
+
+    $FinalRestartRequired =
+        [bool](
+            $RestartRequired -or
+            (
+                $VerificationV2Summary -and
+                $VerificationV2Summary.RestartRequired
+            ) -or
+            (
+                $OEMUpdateSummary -and
+                $OEMUpdateSummary.RestartRequired
+            )
+        )
+
+
+    $FinalOutcome =
+        if ($DeploymentFailed) {
+            'Failed'
+        }
+        elseif ($FinalVerificationStatus -eq 'Failed') {
+            'Failed'
+        }
+        elseif (
+            $FinalVerificationStatus -eq 'Warning' -or
+            $FinalOEMStatus -eq 'Warning'
+        ) {
+            'Warning'
+        }
+        elseif ($FinalRestartRequired) {
+            'SuccessRestartRequired'
+        }
+        elseif (
+            $FinalVerificationStatus -eq 'SuccessNoUpdates' -or
+            $FinalOEMStatus -eq 'SuccessNoUpdates'
+        ) {
+            'SuccessNoUpdates'
+        }
+        elseif (
+            $FinalVerificationStatus -eq 'Success' -or
+            $FinalOEMStatus -match '^Success'
+        ) {
+            'Success'
+        }
+        else {
+            'Unknown'
+        }
+
+
+    $FinalSummary =
+        [PSCustomObject]@{
+
+            SchemaVersion =
+                1
+
+            Outcome =
+                $FinalOutcome
+
+            VerificationStatus =
+                $FinalVerificationStatus
+
+            OEMStatus =
+                $FinalOEMStatus
+
+            RestartRequired =
+                $FinalRestartRequired
+
+            OEM =
+                [PSCustomObject]@{
+
+                    Manufacturer =
+                        if ($OEMUpdateSummary) {
+                            $OEMUpdateSummary.Manufacturer
+                        }
+                        else {
+                            $Manufacturer
+                        }
+
+                    Tool =
+                        if ($OEMUpdateSummary) {
+                            $OEMUpdateSummary.Tool
+                        }
+                        else {
+                            $null
+                        }
+
+                    ToolVersion =
+                        if ($OEMUpdateSummary) {
+                            $OEMUpdateSummary.ToolVersion
+                        }
+                        else {
+                            $null
+                        }
+
+                    Recommendations =
+                        if ($OEMUpdateSummary) {
+                            $OEMUpdateSummary.Recommendations
+                        }
+                        else {
+                            $null
+                        }
+
+                    Downloaded =
+                        if ($OEMUpdateSummary) {
+                            $OEMUpdateSummary.Downloaded
+                        }
+                        else {
+                            $null
+                        }
+
+                    Installed =
+                        if ($OEMUpdateSummary) {
+                            $OEMUpdateSummary.Installed
+                        }
+                        else {
+                            $null
+                        }
+
+                    Failed =
+                        if ($OEMUpdateSummary) {
+                            $OEMUpdateSummary.Failed
+                        }
+                        else {
+                            $null
+                        }
+                }
+
+            DeviceHealth =
+                if (
+                    $VerificationV2Summary -and
+                    $VerificationV2Summary.DeviceHealth
+                ) {
+                    $VerificationV2Summary.DeviceHealth
+                }
+                else {
+                    $null
+                }
+
+            DriverChanges =
+                if (
+                    $VerificationV2Summary -and
+                    $VerificationV2Summary.DriverChanges
+                ) {
+                    $VerificationV2Summary.DriverChanges
+                }
+                else {
+                    $DriverChangesSummary
+                }
+
+            FallbackTelemetry =
+                if (
+                    $OEMUpdateSummary -and
+                    $OEMUpdateSummary.FallbackTelemetry
+                ) {
+                    $OEMUpdateSummary.FallbackTelemetry
+                }
+                else {
+                    $null
+                }
+        }
+
+
     $Summary =
         [PSCustomObject]@{
             ComputerName = $env:COMPUTERNAME
@@ -3205,6 +3399,7 @@ try {
             UpdateDrivers = $UpdateSummary
             Verification = $VerificationSummary
             VerificationV2 = $VerificationV2Summary
+            FinalSummary = $FinalSummary
             DriverChanges = $DriverChangesSummary
             DriverSnapshots = $DriverSnapshotsSummary
             OEMTools = @($OEMToolsSummary)
@@ -3233,6 +3428,14 @@ try {
     Write-Host 'Driver Deployment Summary'
     Write-Host '============================================================'
     Write-Host ''
+    Write-Host 'Final Result'
+    Write-Host "Outcome          : $($FinalSummary.Outcome)"
+    Write-Host "Verification     : $($FinalSummary.VerificationStatus)"
+    Write-Host "OEM Status       : $($FinalSummary.OEMStatus)"
+    Write-Host "Restart Required : $($FinalSummary.RestartRequired)"
+    Write-Host ''
+
+
 
 
     foreach (
@@ -3330,6 +3533,17 @@ try {
 
         if ($OEMUpdateSummary.FallbackTelemetry) {
 
+            $FallbackUsed =
+                [bool](
+                    $OEMUpdateSummary.FallbackTelemetry.WindowsUpdateFallbackUsed -or
+                    $OEMUpdateSummary.FallbackTelemetry.CatalogRecoveryUsed -or
+                    $OEMUpdateSummary.FallbackTelemetry.SystemUpdateFallbackUsed -or
+                    $OEMUpdateSummary.FallbackTelemetry.PrimaryOEMMethodFailed -or
+                    $OEMUpdateSummary.FallbackTelemetry.PrimaryOEMMethodUnavailable
+                )
+
+
+            Write-Host "Fallback Used    : $FallbackUsed"
             Write-Host "WU Fallback      : $($OEMUpdateSummary.FallbackTelemetry.WindowsUpdateFallbackUsed)"
             Write-Host "OEM Failed       : $($OEMUpdateSummary.FallbackTelemetry.PrimaryOEMMethodFailed)"
             Write-Host "OEM Unavailable  : $($OEMUpdateSummary.FallbackTelemetry.PrimaryOEMMethodUnavailable)"
@@ -3392,6 +3606,30 @@ try {
 
         $FinalExitCode =
             0
+    }
+
+
+    Write-Log -Message (
+        'FINAL DEPLOYMENT SUMMARY: ' +
+        "Outcome=$($FinalSummary.Outcome) | " +
+        "Verification=$($FinalSummary.VerificationStatus) | " +
+        "OEMStatus=$($FinalSummary.OEMStatus) | " +
+        "RestartRequired=$($FinalSummary.RestartRequired)"
+    )
+
+
+    if ($FinalSummary.OEM) {
+
+        Write-Log -Message (
+            'FINAL OEM SUMMARY: ' +
+            "Manufacturer=$($FinalSummary.OEM.Manufacturer) | " +
+            "Tool=$($FinalSummary.OEM.Tool) | " +
+            "Version=$($FinalSummary.OEM.ToolVersion) | " +
+            "Recommendations=$($FinalSummary.OEM.Recommendations) | " +
+            "Downloaded=$($FinalSummary.OEM.Downloaded) | " +
+            "Installed=$($FinalSummary.OEM.Installed) | " +
+            "Failed=$($FinalSummary.OEM.Failed)"
+        )
     }
 
 
