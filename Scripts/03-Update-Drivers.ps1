@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Updates device drivers.
 
@@ -58,6 +58,15 @@ $ScriptName =
 # ============================================================
 # VERSION HISTORY
 # ============================================================
+
+# ------------------------------------------------------------
+# Title   : HPIA Detailed Reporting
+# Version : 1.4.3
+# Reason  : Saves explicit HPIA recommendation/result files,
+#           inventories downloaded SoftPaqs and writes a
+#           best-effort recommendation summary to console logs.
+# Date    : 2026-08-27
+# ------------------------------------------------------------
 
 # ------------------------------------------------------------
 # Title   : HPIA Exit-Code Reliability
@@ -4088,63 +4097,377 @@ function Invoke-DellDriverUpdate {
 
 
 # ============================================================
-# HP IMAGE ASSISTANT
+# HP IMAGE ASSISTANT REPORTING
 # ============================================================
 
-function Get-HPImageAssistantPath {
+function Write-HPIAReportSummary {
 
-    $PossibleRoots =
-        @(
-            # Exact path prepared by 02-Install-OEM-Update-Tool.ps1.
-            (
-                Join-Path `
-                    $ToolsPath `
-                    'HPImageAssistant'
-            )
+    param(
+        [Parameter(Mandatory)]
+        [string]$ReportFolder,
 
-            # Legacy/fallback layouts.
-            (
-                Join-Path `
-                    $ToolsPath `
-                    'HP\HPIA'
-            )
+        [Parameter(Mandatory)]
+        [string]$RecommendationXml,
 
-            'C:\Program Files\HP\HPIA'
+        [Parameter(Mandatory)]
+        [string]$RecommendationHtml,
 
-            'C:\Program Files (x86)\HP\HPIA'
-        )
+        [Parameter(Mandatory)]
+        [string]$ResultFile,
+
+        [Parameter(Mandatory)]
+        [string]$DownloadFolder
+    )
 
 
-    foreach (
-        $Root in $PossibleRoots
+    Write-Log -Message (
+        '============================================================'
+    )
+
+    Write-Log -Message (
+        'HP IMAGE ASSISTANT RESULT SUMMARY'
+    )
+
+    Write-Log -Message (
+        '============================================================'
+    )
+
+
+    Write-Log -Message (
+        "HPIA report folder: $ReportFolder"
+    )
+
+
+    if (
+        Test-Path -LiteralPath $RecommendationXml
     ) {
 
-        if (-not (
-            Test-Path -LiteralPath $Root
-        )) {
+        Write-Log -Message (
+            "HPIA recommendation XML: $RecommendationXml"
+        )
+    }
+    else {
 
-            continue
-        }
+        Write-Log `
+            -Message (
+                "HPIA recommendation XML was not created: $RecommendationXml"
+            ) `
+            -Level 'WARNING'
+    }
 
 
-        $Executable =
+    if (
+        Test-Path -LiteralPath $RecommendationHtml
+    ) {
+
+        Write-Log -Message (
+            "HPIA recommendation HTML: $RecommendationHtml"
+        )
+    }
+
+
+    if (
+        Test-Path -LiteralPath $ResultFile
+    ) {
+
+        Write-Log -Message (
+            "HPIA install result file: $ResultFile"
+        )
+    }
+    else {
+
+        Write-Log `
+            -Message (
+                "HPIA install result file was not created: $ResultFile"
+            ) `
+            -Level 'WARNING'
+    }
+
+
+    # --------------------------------------------------------
+    # DOWNLOADED SOFTPAQ INVENTORY
+    # --------------------------------------------------------
+
+    $SoftPaqFiles =
+        @(
             Get-ChildItem `
-                -LiteralPath $Root `
-                -Filter 'HPImageAssistant.exe' `
+                -LiteralPath $DownloadFolder `
+                -Filter 'sp*.exe' `
                 -File `
                 -Recurse `
                 -ErrorAction SilentlyContinue |
-            Select-Object -First 1
+            Sort-Object FullName -Unique
+        )
 
 
-        if ($Executable) {
+    Write-Log -Message (
+        "HPIA downloaded SoftPaq package count: $($SoftPaqFiles.Count)"
+    )
 
-            return $Executable.FullName
+
+    foreach (
+        $SoftPaqFile in $SoftPaqFiles
+    ) {
+
+        $ProductName =
+            $null
+
+        $Description =
+            $null
+
+        $FileVersion =
+            $null
+
+
+        try {
+
+            $ProductName =
+                [string]$SoftPaqFile.VersionInfo.ProductName
+
+            $Description =
+                [string]$SoftPaqFile.VersionInfo.FileDescription
+
+            $FileVersion =
+                [string]$SoftPaqFile.VersionInfo.FileVersion
+        }
+        catch {
+
+            # File version metadata is optional.
+        }
+
+
+        $Parts =
+            @(
+                "SoftPaq=$($SoftPaqFile.BaseName)"
+
+                if (
+                    -not [string]::IsNullOrWhiteSpace(
+                        $ProductName
+                    )
+                ) {
+
+                    "Product=$ProductName"
+                }
+
+                if (
+                    -not [string]::IsNullOrWhiteSpace(
+                        $Description
+                    )
+                ) {
+
+                    "Description=$Description"
+                }
+
+                if (
+                    -not [string]::IsNullOrWhiteSpace(
+                        $FileVersion
+                    )
+                ) {
+
+                    "FileVersion=$FileVersion"
+                }
+
+                "Path=$($SoftPaqFile.FullName)"
+            )
+
+
+        Write-Log -Message (
+            'HPIA PACKAGE: ' +
+            ($Parts -join ' | ')
+        )
+    }
+
+
+    # --------------------------------------------------------
+    # BEST-EFFORT XML RECOMMENDATION SUMMARY
+    #
+    # HPIA report schemas can differ between releases.
+    # Therefore this parser deliberately does not assume one
+    # fixed XML structure. It looks for leaf values belonging
+    # to nodes that contain an SPxxxxx identifier.
+    #
+    # Parser problems are warnings only and can never stop
+    # driver deployment.
+    # --------------------------------------------------------
+
+    if (
+        Test-Path -LiteralPath $RecommendationXml
+    ) {
+
+        try {
+
+            [xml]$RecommendationDocument =
+                Get-Content `
+                    -LiteralPath $RecommendationXml `
+                    -Raw `
+                    -ErrorAction Stop
+
+
+            $RecommendationItems =
+                New-Object System.Collections.ArrayList
+
+
+            $Nodes =
+                @(
+                    $RecommendationDocument.SelectNodes('//*')
+                )
+
+
+            foreach (
+                $Node in $Nodes
+            ) {
+
+                $Values =
+                    @()
+
+
+                if ($Node.Attributes) {
+
+                    foreach (
+                        $Attribute in $Node.Attributes
+                    ) {
+
+                        if (
+                            -not [string]::IsNullOrWhiteSpace(
+                                [string]$Attribute.Value
+                            )
+                        ) {
+
+                            $Values +=
+                                [string]$Attribute.Value
+                        }
+                    }
+                }
+
+
+                foreach (
+                    $Child in @($Node.ChildNodes)
+                ) {
+
+                    if (
+                        $Child.NodeType -eq
+                        [System.Xml.XmlNodeType]::Element -and
+                        $Child.ChildNodes.Count -eq 1 -and
+                        $Child.FirstChild.NodeType -eq
+                        [System.Xml.XmlNodeType]::Text
+                    ) {
+
+                        $Values +=
+                            [string]$Child.InnerText
+                    }
+                }
+
+
+                $JoinedValues =
+                    $Values -join ' | '
+
+
+                $SoftPaqMatch =
+                    [regex]::Match(
+                        $JoinedValues,
+                        '(?i)\bSP\d{4,8}\b'
+                    )
+
+
+                if (-not $SoftPaqMatch.Success) {
+
+                    continue
+                }
+
+
+                $SoftPaq =
+                    $SoftPaqMatch.Value.ToUpperInvariant()
+
+
+                $UsefulValues =
+                    @(
+                        $Values |
+                        ForEach-Object {
+                            [string]$_
+                        } |
+                        Where-Object {
+                            -not [string]::IsNullOrWhiteSpace($_)
+                        } |
+                        Select-Object -Unique
+                    )
+
+
+                $DisplayText =
+                    (
+                        $UsefulValues -join ' | '
+                    )
+
+
+                if (
+                    $DisplayText.Length -gt 500
+                ) {
+
+                    $DisplayText =
+                        $DisplayText.Substring(
+                            0,
+                            500
+                        ) +
+                        '...'
+                }
+
+
+                $Existing =
+                    @(
+                        $RecommendationItems |
+                        Where-Object {
+                            $_.SoftPaq -eq $SoftPaq
+                        }
+                    )
+
+
+                if ($Existing.Count -eq 0) {
+
+                    [void]$RecommendationItems.Add(
+                        [PSCustomObject]@{
+                            SoftPaq =
+                                $SoftPaq
+
+                            Details =
+                                $DisplayText
+                        }
+                    )
+                }
+            }
+
+
+            Write-Log -Message (
+                'HPIA recommendation records detected in XML: ' +
+                "$($RecommendationItems.Count)"
+            )
+
+
+            foreach (
+                $Recommendation in
+                $RecommendationItems
+            ) {
+
+                Write-Log -Message (
+                    "HPIA RECOMMENDATION: $($Recommendation.SoftPaq) | " +
+                    "$($Recommendation.Details)"
+                )
+            }
+        }
+        catch {
+
+            Write-Log `
+                -Message (
+                    'Unable to parse HPIA recommendation XML. ' +
+                    'The HPIA run itself is not affected. ' +
+                    "Reason: $($_.Exception.Message)"
+                ) `
+                -Level 'WARNING'
         }
     }
 
 
-    return $null
+    Write-Log -Message (
+        '============================================================'
+    )
 }
 
 
@@ -4211,6 +4534,67 @@ function Invoke-HPDriverUpdate {
     }
 
 
+    # Use stable filenames so the deployment always knows
+    # exactly where the HPIA output is stored.
+
+    $RecommendationBase =
+        Join-Path `
+            $ReportFolder `
+            'HPIA-Recommendations'
+
+
+    $RecommendationXml =
+        $RecommendationBase +
+        '.xml'
+
+
+    $RecommendationHtml =
+        $RecommendationBase +
+        '.html'
+
+
+    $ResultFile =
+        Join-Path `
+            $ReportFolder `
+            'HPIA-InstallResults.html'
+
+
+    # Remove only the previous HPIA report files.
+    # Downloaded SoftPaqs are retained so they can be inventoried.
+
+    foreach (
+        $PreviousReport in @(
+            $RecommendationXml,
+            $RecommendationHtml,
+            $ResultFile
+        )
+    ) {
+
+        if (
+            Test-Path -LiteralPath $PreviousReport
+        ) {
+
+            Remove-Item `
+                -LiteralPath $PreviousReport `
+                -Force `
+                -ErrorAction SilentlyContinue
+        }
+    }
+
+
+    Write-Log -Message (
+        "HPIA recommendation report base: $RecommendationBase"
+    )
+
+    Write-Log -Message (
+        "HPIA install result file: $ResultFile"
+    )
+
+    Write-Log -Message (
+        "HPIA SoftPaq download folder: $DownloadFolder"
+    )
+
+
     $Process =
         Invoke-ProcessWithTimeout `
             -FilePath $HPIA `
@@ -4221,10 +4605,35 @@ function Invoke-HPDriverUpdate {
                 '/Action:Install'
                 '/Silent'
                 "/SoftpaqDownloadFolder:`"$DownloadFolder`""
-                "/ReportFolder:`"$ReportFolder`""
+                "/ReportFilePath:`"$RecommendationBase`""
+                "/ResultFilePath:`"$ResultFile`""
             ) `
             -TimeoutSeconds $OEMProcessTimeoutSeconds `
             -ProcessName 'HP Image Assistant'
+
+
+    # Always try to show what HPIA produced, even when the
+    # process exit code is unavailable or indicates reboot.
+
+    try {
+
+        Write-HPIAReportSummary `
+            -ReportFolder $ReportFolder `
+            -RecommendationXml $RecommendationXml `
+            -RecommendationHtml $RecommendationHtml `
+            -ResultFile $ResultFile `
+            -DownloadFolder $DownloadFolder
+    }
+    catch {
+
+        Write-Log `
+            -Message (
+                'HPIA result reporting failed, but the driver ' +
+                'deployment will continue. ' +
+                "Reason: $($_.Exception.Message)"
+            ) `
+            -Level 'WARNING'
+    }
 
 
     if (
@@ -4249,6 +4658,28 @@ function Invoke-HPDriverUpdate {
     )
 
 
+    # HP documents 256 as "analysis returned no
+    # recommendations" and 257 as "no recommendations selected".
+    # These are normal no-work outcomes rather than deployment
+    # failures.
+
+    if (
+        $Process.ExitCode -in @(
+            256,
+            257
+        )
+    ) {
+
+        Write-Log -Message (
+            'HP Image Assistant reported no applicable selected ' +
+            "recommendations. Exit code: $($Process.ExitCode)."
+        )
+
+
+        return
+    }
+
+
     if (
         $Process.ExitCode -eq 3010
     ) {
@@ -4257,6 +4688,33 @@ function Invoke-HPDriverUpdate {
             -Reason (
                 'HP Image Assistant requested a restart.'
             )
+
+
+        Write-Log -Message (
+            'HP Image Assistant installed updates successfully and ' +
+            'requested a restart.'
+        )
+
+
+        return
+    }
+
+
+    # 3011 means one or more SoftPaqs were not auto-installable.
+    # Keep this visible, but allow the final Windows Update
+    # phase to continue.
+
+    if (
+        $Process.ExitCode -eq 3011
+    ) {
+
+        Write-Log `
+            -Message (
+                'HP Image Assistant skipped at least one SoftPaq ' +
+                'because it was not auto-installable. Continuing ' +
+                'with final Windows Update. Exit code: 3011.'
+            ) `
+            -Level 'WARNING'
 
 
         return
@@ -4278,8 +4736,6 @@ function Invoke-HPDriverUpdate {
         'HP driver update completed successfully.'
     )
 }
-
-
 
 # ============================================================
 # LENOVO PROCESS / WEB HELPERS
