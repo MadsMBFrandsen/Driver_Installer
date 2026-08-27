@@ -17,7 +17,7 @@
         - Preserves or creates RestartRequired.txt when required
         - Saves DriverVerification.json
         - Inventories installed Dell, HP and Lenovo driver-management tools
-        - Phase 10.0: Detects the current and future permanent HP Image Assistant paths
+        - Phase 10.1: Prefers permanent HP Image Assistant and falls back to deployment-prepared paths
 
     Logging is controlled by Run-DriverDeployment.ps1 through:
 
@@ -1162,7 +1162,7 @@ function Find-HPImageAssistant {
     # PHASE 10.0 - HPIA DETECTION CONSISTENCY
     #
     # Detection order:
-    #   1. Future permanent ITINO/HP location
+    #   1. Permanent HPIA location used by Phase 10.1
     #   2. Other known Program Files HPIA locations
     #   3. Current temporary location prepared by script 02
     #   4. Older ITINO / HP fallback locations

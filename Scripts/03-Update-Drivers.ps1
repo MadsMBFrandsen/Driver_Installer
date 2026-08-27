@@ -191,7 +191,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.4.5'
+    '1.4.6'
 
 $ScriptUpdated =
     '2026-08-27'
@@ -4101,47 +4101,56 @@ function Invoke-DellDriverUpdate {
 # ============================================================
 function Get-HPImageAssistantPath {
 
+    # Phase 10.1:
+    # Prefer the permanent HPIA location. Keep the deployment
+    # working-tree paths as migration/fallback compatibility.
+
     $Candidates =
         @(
-            (Join-Path $ToolsPath 'HPImageAssistant\HPImageAssistant.exe'),
-            (Join-Path $ToolsPath 'HP\HPIA\HPImageAssistant.exe'),
-            (Join-Path $env:ProgramFiles 'HP\HP Image Assistant\HPImageAssistant.exe')
+            'C:\Program Files\HP\HP Image Assistant\HPImageAssistant.exe',
+
+            (
+                Join-Path `
+                    $ToolsPath `
+                    'HPImageAssistant\HPImageAssistant.exe'
+            ),
+
+            (
+                Join-Path `
+                    $ToolsPath `
+                    'HP\HPIA\HPImageAssistant.exe'
+            ),
+
+            'C:\ProgramData\HP\HPIA\HPImageAssistant.exe',
+
+            'C:\Program Files\HP\HPIA\HPImageAssistant.exe',
+
+            'C:\Program Files (x86)\HP\HP Image Assistant\HPImageAssistant.exe',
+
+            'C:\Program Files (x86)\HP\HPIA\HPImageAssistant.exe'
         )
 
-    if (${env:ProgramFiles(x86)}) {
-        $Candidates +=
-            Join-Path `
-                ${env:ProgramFiles(x86)} `
-                'HP\HP Image Assistant\HPImageAssistant.exe'
-    }
 
     foreach ($Candidate in $Candidates) {
+
         if (
-            -not [string]::IsNullOrWhiteSpace($Candidate) -and
-            (Test-Path -LiteralPath $Candidate -PathType Leaf)
+            -not [string]::IsNullOrWhiteSpace(
+                [string]$Candidate
+            ) -and
+            (
+                Test-Path `
+                    -LiteralPath $Candidate `
+                    -PathType Leaf
+            )
         ) {
+
             return $Candidate
         }
     }
 
-    if (Test-Path -LiteralPath $ToolsPath) {
-        $Found =
-            Get-ChildItem `
-                -LiteralPath $ToolsPath `
-                -Filter 'HPImageAssistant.exe' `
-                -File `
-                -Recurse `
-                -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-
-        if ($Found) {
-            return $Found.FullName
-        }
-    }
 
     return $null
 }
-
 
 function Get-HPIAOutputFiles {
 
@@ -7674,5 +7683,6 @@ catch {
 
     exit 1
 }
+
 
 

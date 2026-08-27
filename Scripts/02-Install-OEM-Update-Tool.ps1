@@ -2109,10 +2109,128 @@ function Get-HPImageAssistantInstaller {
 
 function Install-HPImageAssistant {
 
+    $PermanentHPIARoot =
+        'C:\Program Files\HP\HP Image Assistant'
+
+
     $HPIAExecutable =
+        Join-Path `
+            $PermanentHPIARoot `
+            'HPImageAssistant.exe'
+
+
+    $LegacyHPIAExecutable =
         Join-Path `
             $ToolsPath `
             'HPImageAssistant\HPImageAssistant.exe'
+
+
+    # --------------------------------------------------------
+    # PHASE 10.1 - MIGRATE EXISTING TEMPORARY HPIA
+    #
+    # Older deployment cycles extracted HPIA below the ITINO
+    # working tree. If that validated copy exists and the new
+    # permanent location does not, migrate the complete extracted
+    # application before doing another download.
+    # --------------------------------------------------------
+
+    if (
+        -not (
+            Test-Path `
+                -LiteralPath $HPIAExecutable `
+                -PathType Leaf
+        ) -and
+        (
+            Test-Path `
+                -LiteralPath $LegacyHPIAExecutable `
+                -PathType Leaf
+        )
+    ) {
+
+        Write-Log -Message (
+            'Existing temporary HP Image Assistant found. ' +
+            'Migrating it to the permanent Program Files location.'
+        )
+
+
+        Test-InstallerSignature `
+            -Path $LegacyHPIAExecutable `
+            -ExpectedPublisher @(
+                'HP Inc.',
+                'Hewlett-Packard',
+                'HP'
+            ) |
+            Out-Null
+
+
+        if (
+            Test-Path -LiteralPath $PermanentHPIARoot
+        ) {
+
+            Remove-Item `
+                -LiteralPath $PermanentHPIARoot `
+                -Recurse `
+                -Force `
+                -ErrorAction Stop
+        }
+
+
+        New-Item `
+            -Path $PermanentHPIARoot `
+            -ItemType Directory `
+            -Force `
+            -ErrorAction Stop |
+            Out-Null
+
+
+        $LegacyRoot =
+            Split-Path `
+                -Parent `
+                $LegacyHPIAExecutable
+
+
+        Copy-Item `
+            -Path (
+                Join-Path `
+                    $LegacyRoot `
+                    '*'
+            ) `
+            -Destination $PermanentHPIARoot `
+            -Recurse `
+            -Force `
+            -ErrorAction Stop
+
+
+        if (-not (
+            Test-Path `
+                -LiteralPath $HPIAExecutable `
+                -PathType Leaf
+        )) {
+
+            throw (
+                'HP Image Assistant migration failed. ' +
+                "Permanent executable not found: $HPIAExecutable"
+            )
+        }
+
+
+        Test-InstallerSignature `
+            -Path $HPIAExecutable `
+            -ExpectedPublisher @(
+                'HP Inc.',
+                'Hewlett-Packard',
+                'HP'
+            ) |
+            Out-Null
+
+
+        Write-Log -Message (
+            "HP Image Assistant migrated permanently: $HPIAExecutable"
+        )
+
+
+        return
+    }
 
 
     if (
@@ -2135,7 +2253,7 @@ function Install-HPImageAssistant {
 
 
         Write-Log -Message (
-            'HP Image Assistant is already ready.'
+            'Permanent HP Image Assistant is already ready.'
         )
 
 
@@ -2156,9 +2274,7 @@ function Install-HPImageAssistant {
 
 
     $ExtractionPath =
-        Join-Path `
-            $ToolsPath `
-            'HPImageAssistant'
+        $PermanentHPIARoot
 
     Write-Log -Message (
         "Available HP Image Assistant version: $InstallerVersion"
@@ -2428,7 +2544,7 @@ function Install-HPImageAssistant {
 
 
     Write-Log -Message (
-        "HP Image Assistant ready: $HPIAExecutable"
+        "Permanent HP Image Assistant ready: $HPIAExecutable"
     )
 }
 
@@ -3097,6 +3213,12 @@ try {
 
     Write-Log -Message (
         "HP Image Assistant executable wait: $HPImageAssistantExecutableWaitSeconds seconds"
+    )
+
+
+    Write-Log -Message (
+        'HP Image Assistant permanent path: ' +
+        'C:\Program Files\HP\HP Image Assistant\HPImageAssistant.exe'
     )
 
 
