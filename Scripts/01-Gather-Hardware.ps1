@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Collects hardware and Plug and Play device information.
 
@@ -1159,6 +1159,9 @@ try {
         $RollbackManifest =
             [pscustomobject]@{
 
+                SchemaVersion =
+                    2
+
                 Created =
                     (Get-Date).ToString(
                         'yyyy-MM-dd HH:mm:ss'
@@ -1178,6 +1181,21 @@ try {
 
                 ComputerName =
                     $env:COMPUTERNAME
+
+                DeploymentSessionId =
+                    $DeploymentSessionId
+
+                BaselineCycle =
+                    $DeploymentCycle
+
+                Manufacturer =
+                    [string]$ComputerSystem.Manufacturer
+
+                Model =
+                    [string]$ComputerSystem.Model
+
+                SystemUUID =
+                    [string]$ComputerSystemProduct.UUID
 
                 SnapshotFile =
                     $DriverSnapshotBeforeFile
@@ -1203,6 +1221,12 @@ try {
                             -not $_.Success
                         }
                     ).Count
+
+                Deployment =
+                    $null
+
+                CycleHistory =
+                    @()
 
                 Packages =
                     @(

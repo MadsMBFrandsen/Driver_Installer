@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Performs prerequisite checks for the ITINO Driver Deployment workflow.
 

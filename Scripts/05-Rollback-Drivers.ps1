@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     ITINO manual driver rollback utility with post-rollback verification.
 
@@ -1174,7 +1174,7 @@ function Invoke-DriverRollback {
 
 Write-Host ''
 Write-Host '============================================================'
-Write-Host 'ITINO DRIVER ROLLBACK - PHASE 8.1'
+Write-Host 'ITINO DRIVER ROLLBACK - PHASE 10.12'
 Write-Host '============================================================'
 Write-Host ''
 
@@ -1197,6 +1197,34 @@ Write-RollbackLog -Message (
 $RollbackManifest =
     Read-JsonFile `
         -Path $RollbackManifestFile
+
+
+# ============================================================
+# PHASE 10.12 - ROLLBACK SOURCE METADATA
+# ============================================================
+
+Write-Host 'Rollback Source'
+Write-Host "Archive           : $RollbackBackupPath"
+Write-Host "Created           : $($RollbackManifest.Created)"
+Write-Host "Computer          : $($RollbackManifest.ComputerName)"
+Write-Host "Session ID        : $($RollbackManifest.DeploymentSessionId)"
+Write-Host "Baseline Cycle    : $($RollbackManifest.BaselineCycle)"
+Write-Host "Manufacturer      : $($RollbackManifest.Manufacturer)"
+Write-Host "Model             : $($RollbackManifest.Model)"
+
+
+if ($RollbackManifest.Deployment) {
+
+    Write-Host "Final Cycle       : $($RollbackManifest.Deployment.FinalCycle)"
+    Write-Host "Deployment Status : $($RollbackManifest.Deployment.ControllerStatus)"
+    Write-Host "Final Outcome     : $($RollbackManifest.Deployment.FinalOutcome)"
+    Write-Host "OEM Status        : $($RollbackManifest.Deployment.OEMUpdate.Status)"
+    Write-Host "Verification      : $($RollbackManifest.Deployment.Verification.OverallStatus)"
+    Write-Host "Restart Required  : $($RollbackManifest.Deployment.RestartRequired)"
+}
+
+
+Write-Host ''
 
 
 $BeforeSnapshot =
@@ -1405,6 +1433,56 @@ $RollbackVerification =
 
         ComputerName =
             $env:COMPUTERNAME
+
+        SourceDeployment =
+            [PSCustomObject]@{
+
+                SessionId =
+                    $RollbackManifest.DeploymentSessionId
+
+                BaselineCycle =
+                    $RollbackManifest.BaselineCycle
+
+                FinalCycle =
+                    if ($RollbackManifest.Deployment) {
+                        $RollbackManifest.Deployment.FinalCycle
+                    }
+                    else {
+                        $null
+                    }
+
+                FinalOutcome =
+                    if ($RollbackManifest.Deployment) {
+                        $RollbackManifest.Deployment.FinalOutcome
+                    }
+                    else {
+                        $null
+                    }
+
+                OEM =
+                    if ($RollbackManifest.Deployment) {
+                        $RollbackManifest.Deployment.OEMUpdate
+                    }
+                    else {
+                        $null
+                    }
+
+                Verification =
+                    if ($RollbackManifest.Deployment) {
+                        $RollbackManifest.Deployment.Verification
+                    }
+                    else {
+                        $null
+                    }
+
+                DriverChanges =
+                    if ($RollbackManifest.Deployment) {
+                        $RollbackManifest.Deployment.DriverChanges
+                    }
+                    else {
+                        $null
+                    }
+            }
 
         Attempted =
             $Results.Count

@@ -1769,6 +1769,327 @@ function Remove-EntireItinoRoot {
 # ============================================================
 
 
+function Update-DriverRollbackManifestMetadata {
+
+    param(
+        [Parameter(Mandatory)]
+        [object]$DeploymentSummary,
+
+        [Parameter(Mandatory)]
+        [int]$FinalExitCode
+    )
+
+
+    try {
+
+        if (-not (
+            Test-Path `
+                -LiteralPath $HardwareFile `
+                -PathType Leaf
+        )) {
+
+            Write-Log `
+                -Message (
+                    'Rollback metadata enrichment skipped because ' +
+                    "HardwareInformation.json was not found: $HardwareFile"
+                ) `
+                -Level 'WARNING'
+
+            return
+        }
+
+
+        $HardwareInformation =
+            Get-Content `
+                -LiteralPath $HardwareFile `
+                -Raw `
+                -ErrorAction Stop |
+            ConvertFrom-Json
+
+
+        $RollbackManifestPath =
+            [string]$HardwareInformation.DriverRollbackBackup.Manifest
+
+
+        if (
+            [string]::IsNullOrWhiteSpace(
+                $RollbackManifestPath
+            ) -or
+            -not (
+                Test-Path `
+                    -LiteralPath $RollbackManifestPath `
+                    -PathType Leaf
+            )
+        ) {
+
+            Write-Log `
+                -Message (
+                    'Rollback metadata enrichment skipped because the ' +
+                    'active rollback manifest could not be resolved.'
+                ) `
+                -Level 'WARNING'
+
+            return
+        }
+
+
+        $RollbackManifest =
+            Get-Content `
+                -LiteralPath $RollbackManifestPath `
+                -Raw `
+                -ErrorAction Stop |
+            ConvertFrom-Json
+
+
+        # Add newer properties to older manifests without breaking
+        # rollback archives created before Phase 10.12.
+
+        if (-not (
+            $RollbackManifest.PSObject.Properties.Name -contains
+            'SchemaVersion'
+        )) {
+
+            $RollbackManifest |
+                Add-Member `
+                    -NotePropertyName SchemaVersion `
+                    -NotePropertyValue 2
+        }
+        else {
+
+            $RollbackManifest.SchemaVersion =
+                2
+        }
+
+
+        if (-not (
+            $RollbackManifest.PSObject.Properties.Name -contains
+            'DeploymentSessionId'
+        )) {
+
+            $RollbackManifest |
+                Add-Member `
+                    -NotePropertyName DeploymentSessionId `
+                    -NotePropertyValue (
+                        if ($script:DeploymentSession) {
+                            $script:DeploymentSession.SessionId
+                        }
+                        else {
+                            $null
+                        }
+                    )
+        }
+
+
+        if (-not (
+            $RollbackManifest.PSObject.Properties.Name -contains
+            'CycleHistory'
+        )) {
+
+            $RollbackManifest |
+                Add-Member `
+                    -NotePropertyName CycleHistory `
+                    -NotePropertyValue @()
+        }
+
+
+        $CurrentCycle =
+            if ($script:DeploymentSession) {
+                [int]$script:DeploymentSession.Cycle
+            }
+            else {
+                $null
+            }
+
+
+        $CycleRecord =
+            [PSCustomObject]@{
+
+                Cycle =
+                    $CurrentCycle
+
+                CompletionTime =
+                    Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+                ExitCode =
+                    $FinalExitCode
+
+                Status =
+                    $DeploymentSummary.Status
+
+                FinalOutcome =
+                    if ($DeploymentSummary.FinalSummary) {
+                        $DeploymentSummary.FinalSummary.Outcome
+                    }
+                    else {
+                        $null
+                    }
+
+                RestartRequired =
+                    [bool]$DeploymentSummary.RestartRequired
+
+                FailedStage =
+                    $DeploymentSummary.FailedStage
+
+                OEMStatus =
+                    if ($DeploymentSummary.OEMUpdateResult) {
+                        $DeploymentSummary.OEMUpdateResult.Status
+                    }
+                    else {
+                        $null
+                    }
+
+                VerificationStatus =
+                    if ($DeploymentSummary.VerificationV2) {
+                        $DeploymentSummary.VerificationV2.OverallStatus
+                    }
+                    else {
+                        $null
+                    }
+            }
+
+
+        $ExistingCycleHistory =
+            @(
+                $RollbackManifest.CycleHistory |
+                Where-Object {
+                    [string]$_.Cycle -ne
+                    [string]$CurrentCycle
+                }
+            )
+
+
+        $RollbackManifest.CycleHistory =
+            @(
+                $ExistingCycleHistory
+                $CycleRecord
+            )
+
+
+        $DeploymentMetadata =
+            [PSCustomObject]@{
+
+                LastUpdated =
+                    Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+                SessionId =
+                    if ($script:DeploymentSession) {
+                        $script:DeploymentSession.SessionId
+                    }
+                    else {
+                        $null
+                    }
+
+                FinalCycle =
+                    $CurrentCycle
+
+                ControllerStatus =
+                    $DeploymentSummary.Status
+
+                FinalOutcome =
+                    if ($DeploymentSummary.FinalSummary) {
+                        $DeploymentSummary.FinalSummary.Outcome
+                    }
+                    else {
+                        $null
+                    }
+
+                ExitCode =
+                    $FinalExitCode
+
+                RestartRequired =
+                    [bool]$DeploymentSummary.RestartRequired
+
+                FailedStage =
+                    $DeploymentSummary.FailedStage
+
+                Computer =
+                    $DeploymentSummary.Computer
+
+                OEMUpdate =
+                    $DeploymentSummary.OEMUpdateResult
+
+                Verification =
+                    $DeploymentSummary.VerificationV2
+
+                DriverChanges =
+                    if ($DeploymentSummary.FinalSummary) {
+                        $DeploymentSummary.FinalSummary.DriverChanges
+                    }
+                    else {
+                        $DeploymentSummary.DriverChanges
+                    }
+
+                RestartReasons =
+                    @(
+                        $DeploymentSummary.RestartReasons
+                    )
+
+                Artifacts =
+                    [PSCustomObject]@{
+
+                        DeploymentSummary =
+                            $SummaryFile
+
+                        OEMUpdateResult =
+                            $OEMUpdateResultFile
+
+                        DriverVerification =
+                            $VerificationFile
+
+                        HardwareInformation =
+                            $HardwareFile
+                    }
+            }
+
+
+        if (-not (
+            $RollbackManifest.PSObject.Properties.Name -contains
+            'Deployment'
+        )) {
+
+            $RollbackManifest |
+                Add-Member `
+                    -NotePropertyName Deployment `
+                    -NotePropertyValue $DeploymentMetadata
+        }
+        else {
+
+            $RollbackManifest.Deployment =
+                $DeploymentMetadata
+        }
+
+
+        $RollbackManifest |
+            ConvertTo-Json `
+                -Depth 16 |
+            Set-Content `
+                -LiteralPath $RollbackManifestPath `
+                -Encoding UTF8
+
+
+        Write-Log -Message (
+            'Rollback manifest enriched with deployment metadata. ' +
+            "Manifest='$RollbackManifestPath'; " +
+            "Cycle=$CurrentCycle; " +
+            "ExitCode=$FinalExitCode; " +
+            "Outcome=$($DeploymentMetadata.FinalOutcome)."
+        )
+    }
+    catch {
+
+        # Metadata enrichment is useful for rollback auditing, but must
+        # never convert an otherwise valid deployment into a failure.
+
+        Write-Log `
+            -Message (
+                'Unable to enrich rollback manifest metadata. ' +
+                "Reason: $($_.Exception.Message)"
+            ) `
+            -Level 'WARNING'
+    }
+}
+
+
 function Remove-DriverRollbackData {
 
     if (-not $DeleteDriverRollbackAfterDeployment) {
@@ -3417,6 +3738,23 @@ try {
     Write-Log -Message (
         "Deployment summary saved to '$SummaryFile'."
     )
+
+
+    $PredictedFinalExitCode =
+        if ($OverallStatus -eq 'Failed') {
+            1
+        }
+        elseif ($RestartRequired) {
+            3010
+        }
+        else {
+            0
+        }
+
+
+    Update-DriverRollbackManifestMetadata `
+        -DeploymentSummary $Summary `
+        -FinalExitCode $PredictedFinalExitCode
 
 
     # ========================================================
