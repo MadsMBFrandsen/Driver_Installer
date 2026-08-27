@@ -191,7 +191,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.5.1'
+    '1.5.2'
 
 $ScriptUpdated =
     '2026-08-27'
@@ -808,7 +808,11 @@ function Invoke-ProcessWithTimeout {
 
         [int]$TimeoutSeconds = 3600,
 
-        [string]$ProcessName = 'OEM update process'
+        [string]$ProcessName = 'OEM update process',
+
+        [switch]$UseProcessStartInfo,
+
+        [switch]$HiddenWindow
     )
 
 
@@ -817,15 +821,97 @@ function Invoke-ProcessWithTimeout {
     )
 
 
+    if (
+        $ArgumentList -and
+        $ArgumentList.Count -gt 0
+    ) {
+
+        Write-Log -Message (
+            "$ProcessName arguments: $($ArgumentList -join ' ')"
+        )
+    }
+
+
     $Process =
-        Start-Process `
-            -FilePath $FilePath `
-            -ArgumentList $ArgumentList `
-            -PassThru `
-            -NoNewWindow
+        $null
 
 
     try {
+
+        if ($UseProcessStartInfo) {
+
+            # Preserve direct ProcessStartInfo behavior for vendor tools
+            # that do not behave consistently through Start-Process.
+
+            $StartInfo =
+                New-Object System.Diagnostics.ProcessStartInfo
+
+
+            $StartInfo.FileName =
+                $FilePath
+
+
+            $StartInfo.Arguments =
+                $ArgumentList -join ' '
+
+
+            $StartInfo.UseShellExecute =
+                $false
+
+
+            $StartInfo.CreateNoWindow =
+                $true
+
+
+            $Process =
+                New-Object System.Diagnostics.Process
+
+
+            $Process.StartInfo =
+                $StartInfo
+
+
+            if (-not $Process.Start()) {
+
+                throw (
+                    "$ProcessName could not be started. " +
+                    'System.Diagnostics.Process.Start() returned False.'
+                )
+            }
+        }
+        else {
+
+            $StartProcessParameters =
+                @{
+                    FilePath = $FilePath
+                    ArgumentList = $ArgumentList
+                    PassThru = $true
+                    ErrorAction = 'Stop'
+                }
+
+
+            if ($HiddenWindow) {
+
+                $StartProcessParameters.WindowStyle =
+                    'Hidden'
+            }
+            else {
+
+                $StartProcessParameters.NoNewWindow =
+                    $true
+            }
+
+
+            $Process =
+                Start-Process `
+                    @StartProcessParameters
+        }
+
+
+        Write-Log -Message (
+            "$ProcessName process ID: $($Process.Id)"
+        )
+
 
         $Completed =
             $Process.WaitForExit(
@@ -845,10 +931,17 @@ function Invoke-ProcessWithTimeout {
 
             try {
 
-                Stop-Process `
-                    -Id $Process.Id `
-                    -Force `
-                    -ErrorAction Stop
+                if ($UseProcessStartInfo) {
+
+                    $Process.Kill()
+                }
+                else {
+
+                    Stop-Process `
+                        -Id $Process.Id `
+                        -Force `
+                        -ErrorAction Stop
+                }
             }
             catch {
 
@@ -875,10 +968,8 @@ function Invoke-ProcessWithTimeout {
         }
 
 
-        # Windows PowerShell 5.1 can occasionally leave ExitCode
-        # unavailable after WaitForExit(milliseconds). A final
-        # parameterless WaitForExit() ensures termination details
-        # are fully available before ExitCode is read.
+        # PowerShell 5.1 reliability: always finalize process state
+        # before attempting to read ExitCode.
 
         try {
 
@@ -925,6 +1016,13 @@ function Invoke-ProcessWithTimeout {
         }
 
 
+        Write-Log -Message (
+            "$ProcessName completed. " +
+            "ExitCodeAvailable=$ExitCodeAvailable; " +
+            "ExitCode=$ExitCode."
+        )
+
+
         return [PSCustomObject]@{
 
             ExitCode =
@@ -935,6 +1033,20 @@ function Invoke-ProcessWithTimeout {
 
             ProcessId =
                 $Process.Id
+
+            TimedOut =
+                $false
+
+            ProcessName =
+                $ProcessName
+
+            FilePath =
+                $FilePath
+
+            Arguments =
+                @(
+                    $ArgumentList
+                )
         }
     }
     finally {
@@ -1495,17 +1607,19 @@ function Request-WindowsUpdateScan {
     try {
 
         $Process =
-            Start-Process `
+            Invoke-ProcessWithTimeout `
                 -FilePath $UsoClient `
-                -ArgumentList 'StartScan' `
-                -WindowStyle Hidden `
-                -Wait `
-                -PassThru `
-                -ErrorAction Stop
+                -ArgumentList @(
+                    'StartScan'
+                ) `
+                -TimeoutSeconds 60 `
+                -ProcessName 'Windows Update scan trigger' `
+                -HiddenWindow
 
 
         Write-Log -Message (
-            "Windows Update scan request exit code: $($Process.ExitCode)"
+            'Windows Update scan request exit code: ' +
+            "$($Process.ExitCode)"
         )
     }
     catch {
@@ -5925,146 +6039,6 @@ function Get-ItinoExceptionResponseUrl {
 }
 
 
-function Invoke-LenovoSystemUpdateProcess {
-
-    param(
-        [Parameter(Mandatory)]
-        [string]$FilePath,
-
-        [Parameter(Mandatory)]
-        [string[]]$ArgumentList,
-
-        [Parameter(Mandatory)]
-        [int]$TimeoutSeconds
-    )
-
-
-    $ArgumentString =
-        $ArgumentList -join ' '
-
-
-    Write-Log -Message (
-        "Starting Lenovo System Update process directly. Timeout: $TimeoutSeconds seconds."
-    )
-
-
-    Write-Log -Message (
-        "Lenovo System Update arguments: $ArgumentString"
-    )
-
-
-    $StartInfo =
-        New-Object System.Diagnostics.ProcessStartInfo
-
-
-    $StartInfo.FileName =
-        $FilePath
-
-
-    $StartInfo.Arguments =
-        $ArgumentString
-
-
-    $StartInfo.UseShellExecute =
-        $false
-
-
-    $StartInfo.CreateNoWindow =
-        $true
-
-
-    $Process =
-        New-Object System.Diagnostics.Process
-
-
-    $Process.StartInfo =
-        $StartInfo
-
-
-    try {
-
-        if (
-            -not $Process.Start()
-        ) {
-
-            throw (
-                'System.Diagnostics.Process.Start() returned False.'
-            )
-        }
-
-
-        Write-Log -Message (
-            "Lenovo System Update process ID: $($Process.Id)"
-        )
-
-
-        $Completed =
-            $Process.WaitForExit(
-                $TimeoutSeconds * 1000
-            )
-
-
-        if (-not $Completed) {
-
-            Write-Log `
-                -Message (
-                    'Lenovo System Update exceeded the configured timeout. ' +
-                    "Stopping process ID $($Process.Id)."
-                ) `
-                -Level 'ERROR'
-
-
-            try {
-
-                $Process.Kill()
-            }
-            catch {
-
-                Write-Log `
-                    -Message (
-                        'Unable to terminate Lenovo System Update process. ' +
-                        "Reason: $($_.Exception.Message)"
-                    ) `
-                    -Level 'WARNING'
-            }
-
-
-            throw (
-                "Lenovo System Update timed out after $TimeoutSeconds seconds."
-            )
-        }
-
-
-        # A parameterless WaitForExit() after the timed wait makes sure
-        # asynchronous process state has been completely finalized before
-        # ExitCode is read.
-        $Process.WaitForExit()
-
-
-        $ExitCode =
-            [int]$Process.ExitCode
-
-
-        Write-Log -Message (
-            "Lenovo System Update process returned exit code: $ExitCode"
-        )
-
-
-        return [PSCustomObject]@{
-            ExitCode = $ExitCode
-            ProcessId = $Process.Id
-        }
-    }
-    finally {
-
-        if ($Process) {
-
-            $Process.Dispose()
-        }
-    }
-}
-
-
 function Resolve-LenovoPackageFileUrl {
 
     param(
@@ -6837,10 +6811,12 @@ function Invoke-LenovoSystemUpdate {
 
 
     $Process =
-        Invoke-LenovoSystemUpdateProcess `
+        Invoke-ProcessWithTimeout `
             -FilePath $TVSUShim `
             -ArgumentList $Arguments `
-            -TimeoutSeconds $OEMProcessTimeoutSeconds
+            -TimeoutSeconds $OEMProcessTimeoutSeconds `
+            -ProcessName 'Lenovo System Update' `
+            -UseProcessStartInfo
 
 
     Write-Log -Message (
@@ -8752,6 +8728,13 @@ function Write-OEMUpdateResult {
 
                 FallbackTelemetry =
                     $script:OEMFallbackTelemetry
+
+                ProcessExecution =
+                    [PSCustomObject]@{
+                        CommonHelper = 'Invoke-ProcessWithTimeout'
+                        HelperVersion = 2
+                        PowerShell51ExitCodeFinalization = $true
+                    }
 
                 Notes =
                     $Notes
