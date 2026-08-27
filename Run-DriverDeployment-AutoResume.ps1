@@ -116,9 +116,73 @@ $ControllerPath =
         $ControllerFileName
 
 
+# Dedicated wrapper log. This is separate from the controller
+# transcript so restart/resume behavior can be verified easily.
+$AutoResumeLogDirectory =
+    'C:\ProgramData\Itino\DriverDeployment'
+
+
+$AutoResumeLogPath =
+    Join-Path `
+        $AutoResumeLogDirectory `
+        'AutoResume.log'
+
+
 # ============================================================
 # HELPERS
 # ============================================================
+
+function Write-AutoResumeLog {
+
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+
+        [ValidateSet(
+            'INFO',
+            'WARNING',
+            'ERROR'
+        )]
+        [string]$Level = 'INFO'
+    )
+
+
+    try {
+
+        if (-not (
+            Test-Path -LiteralPath $AutoResumeLogDirectory
+        )) {
+
+            New-Item `
+                -ItemType Directory `
+                -Path $AutoResumeLogDirectory `
+                -Force `
+                -ErrorAction Stop |
+            Out-Null
+        }
+
+
+        $Line =
+            (
+                '[{0}] [{1}] {2}' -f
+                (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),
+                $Level,
+                $Message
+            )
+
+
+        Add-Content `
+            -LiteralPath $AutoResumeLogPath `
+            -Value $Line `
+            -Encoding UTF8 `
+            -ErrorAction Stop
+    }
+    catch {
+
+        # Logging must never block deployment.
+    }
+}
+
 
 function Test-IsAdministrator {
 
@@ -165,6 +229,10 @@ function Remove-ItinoResumeTask {
 
 
             Write-Host (
+                "Removed temporary resume task: $ResumeTaskName"
+            )
+
+            Write-AutoResumeLog -Message (
                 "Removed temporary resume task: $ResumeTaskName"
             )
         }
@@ -276,6 +344,10 @@ function Register-ItinoResumeTask {
     Write-Host (
         "Resume delay after startup: $ResumeDelayAfterStartupSeconds seconds"
     )
+
+    Write-AutoResumeLog -Message (
+        "Resume task created. Task='$ResumeTaskName'; StartupDelaySeconds=$ResumeDelayAfterStartupSeconds"
+    )
 }
 
 
@@ -294,6 +366,10 @@ function Invoke-ItinoAutomaticRestart {
         'The temporary resume task will continue the driver deployment after startup.'
     )
     Write-Host ''
+
+    Write-AutoResumeLog -Message (
+        "Automatic restart scheduled in $RestartDelaySeconds seconds after controller exit code 3010."
+    )
 
 
     # shutdown.exe is used instead of Restart-Computer so the
@@ -346,6 +422,10 @@ Write-Host (
 )
 
 Write-Host ''
+
+Write-AutoResumeLog -Message (
+    "Wrapper started. ResumeFromTask=$ResumeFromTask; User=$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name); Wrapper='$WrapperPath'"
+)
 
 
 # ============================================================
@@ -414,6 +494,10 @@ if ($ResumeFromTask) {
         'Deployment resumed after restart. Removing the temporary startup task.'
     )
 
+    Write-AutoResumeLog -Message (
+        'Started by scheduled task after restart. Removing the temporary resume task before starting the next deployment cycle.'
+    )
+
     Remove-ItinoResumeTask
 }
 
@@ -427,6 +511,10 @@ Write-Host '============================================================'
 Write-Host 'STARTING DRIVER DEPLOYMENT CONTROLLER'
 Write-Host '============================================================'
 Write-Host ''
+
+Write-AutoResumeLog -Message (
+    "Starting controller: $ControllerPath"
+)
 
 
 & "$PSHOME\powershell.exe" `
@@ -452,6 +540,10 @@ Write-Host (
 
 Write-Host ''
 
+Write-AutoResumeLog -Message (
+    "Controller finished. ExitCode=$ControllerExitCode"
+)
+
 
 # ============================================================
 # HANDLE CONTROLLER RESULT
@@ -472,6 +564,10 @@ switch ($ControllerExitCode) {
             'Driver deployment completed successfully.'
         )
 
+        Write-AutoResumeLog -Message (
+            'Deployment completed successfully. ExitCode=0. No further resume task required.'
+        )
+
         exit 0
     }
 
@@ -483,6 +579,10 @@ switch ($ControllerExitCode) {
             Write-Host (
                 'Restart required, but automatic resume is disabled.'
             )
+
+            Write-AutoResumeLog -Message (
+                'Controller returned 3010, but resume-after-restart is disabled.'
+            ) -Level WARNING
 
             exit 3010
         }
@@ -562,6 +662,10 @@ switch ($ControllerExitCode) {
         Write-Host (
             'No resume task was created or changed by this launcher instance.'
         )
+
+        Write-AutoResumeLog -Message (
+            'Controller returned 1618. Another deployment instance is already running. Resume task unchanged.'
+        ) -Level WARNING
 
         exit 1618
     }
