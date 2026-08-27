@@ -62,6 +62,16 @@ $ScriptName =
 # VERSION HISTORY
 # ============================================================
 # ------------------------------------------------------------
+# Title   : Session-Aware Console Transcript
+# Version : 1.1.11
+# Reason  : Prevents Cycle1/Cycle2 transcript files from an old
+#           completed deployment session being overwritten when
+#           a completely new deployment starts at Cycle 1.
+# Date    : 2026-08-27
+# ------------------------------------------------------------
+
+
+# ------------------------------------------------------------
 # Title   : Single Cleanup Switch
 # Version : 1.1.7
 # Reason  : Removes DeleteEntireItinoRootOnCleanSuccess and uses
@@ -124,10 +134,10 @@ $ScriptName =
 # ------------------------------------------------------------
 
 $ScriptVersion =
-    '1.1.7'
+    '1.1.11'
 
 $ScriptUpdated =
-    '2026-08-26'
+    '2026-08-27'
 
 
 $ErrorActionPreference =
@@ -182,8 +192,8 @@ $WriteLogFiles =
 #     $false
 #
 # Files:
-#   C:\ProgramData\Itino\DriverDeployment\ConsoleOutput-Cycle1.log
-#   C:\ProgramData\Itino\DriverDeployment\ConsoleOutput-Cycle2.log
+#   C:\ProgramData\Itino\DriverDeployment\ConsoleOutput-SessionA1B2C3D4-Cycle1.log
+#   C:\ProgramData\Itino\DriverDeployment\ConsoleOutput-SessionA1B2C3D4-Cycle2.log
 #
 # The transcript survives exit 3010 and exit 1.
 # On final exit 0 the transcript is stopped before the complete
@@ -750,11 +760,36 @@ function Start-ItinoConsoleTranscript {
         [int]$script:DeploymentSession.Cycle
 
 
+    $ConsoleSessionId =
+        [string]$script:DeploymentSession.SessionId
+
+
+    if (
+        [string]::IsNullOrWhiteSpace(
+            $ConsoleSessionId
+        )
+    ) {
+
+        $ConsoleSessionId =
+            Get-Date -Format 'yyyyMMdd-HHmmss'
+    }
+    elseif ($ConsoleSessionId.Length -gt 8) {
+
+        $ConsoleSessionId =
+            $ConsoleSessionId.Substring(
+                0,
+                8
+            )
+    }
+
+
     $script:ConsoleOutputFile =
         Join-Path `
             $BasePath `
             (
-                "ConsoleOutput-Cycle$($script:ConsoleOutputCycle).log"
+                'ConsoleOutput-Session{0}-Cycle{1}.log' -f
+                    $ConsoleSessionId,
+                    $script:ConsoleOutputCycle
             )
 
 
@@ -770,6 +805,10 @@ function Start-ItinoConsoleTranscript {
         $script:ConsoleTranscriptStarted =
             $true
 
+
+        Write-Log -Message (
+            "Console transcript session: $ConsoleSessionId"
+        )
 
         Write-Log -Message (
             "Console transcript cycle: $($script:ConsoleOutputCycle)"
