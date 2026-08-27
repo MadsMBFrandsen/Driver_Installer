@@ -2331,74 +2331,280 @@ try {
 
 
     # ========================================================
-    # PHASE 10.2 - ENRICH OEM RESULT WITH VERIFICATION
+    # PHASE 10.10 - NORMALIZED VERIFICATION MODEL
+    # ========================================================
+
+    $ChangedCount =
+        @(
+            $DriverComparison.Changed
+        ).Count
+
+
+    $AddedCount =
+        @(
+            $DriverComparison.Added
+        ).Count
+
+
+    $RemovedCount =
+        @(
+            $DriverComparison.Removed
+        ).Count
+
+
+    $DeviceHealthStatus =
+        if (
+            $RemainingCount -eq 0 -and
+            $NewCount -eq 0
+        ) {
+            'Healthy'
+        }
+        elseif (
+            $NewCount -gt 0
+        ) {
+            'NewErrorsDetected'
+        }
+        else {
+            'ErrorsRemain'
+        }
+
+
+    $DriverChangeStatus =
+        if (
+            $ChangedCount -eq 0 -and
+            $AddedCount -eq 0 -and
+            $RemovedCount -eq 0
+        ) {
+            'NoChanges'
+        }
+        else {
+            'ChangesDetected'
+        }
+
+
+    $OEMVerificationStatus =
+        if (-not $OEMUpdateResult) {
+            'NotAvailable'
+        }
+        elseif (
+            $OEMUpdateResult.Status -eq 'Failed'
+        ) {
+            'Failed'
+        }
+        elseif (
+            $OEMUpdateResult.Status -eq 'Warning'
+        ) {
+            'Warning'
+        }
+        elseif (
+            $OEMUpdateResult.Status -match '^Success'
+        ) {
+            'Success'
+        }
+        else {
+            [string]$OEMUpdateResult.Status
+        }
+
+
+    $OverallVerificationStatus =
+        if (
+            $DeviceHealthStatus -eq 'NewErrorsDetected'
+        ) {
+            'Failed'
+        }
+        elseif (
+            $DeviceHealthStatus -eq 'ErrorsRemain' -or
+            $OEMVerificationStatus -eq 'Failed'
+        ) {
+            'Warning'
+        }
+        elseif (
+            $OEMVerificationStatus -eq 'Warning'
+        ) {
+            'Warning'
+        }
+        elseif ($RestartRequired) {
+            'SuccessRestartRequired'
+        }
+        elseif (
+            $DriverChangeStatus -eq 'NoChanges' -and
+            $OEMUpdateResult -and
+            $OEMUpdateResult.Status -eq 'SuccessNoUpdates'
+        ) {
+            'SuccessNoUpdates'
+        }
+        else {
+            'Success'
+        }
+
+
+    $DeviceHealthSummary =
+        [PSCustomObject]@{
+
+            Status =
+                $DeviceHealthStatus
+
+            ErrorsBefore =
+                $BeforeCount
+
+            ErrorsAfter =
+                $AfterCount
+
+            Fixed =
+                $FixedCount
+
+            Remaining =
+                $RemainingCount
+
+            NewErrors =
+                $NewCount
+
+            RestartDevices =
+                $RestartDeviceCount
+        }
+
+
+    $DriverChangeSummary =
+        [PSCustomObject]@{
+
+            Status =
+                $DriverChangeStatus
+
+            Changed =
+                $ChangedCount
+
+            Added =
+                $AddedCount
+
+            Removed =
+                $RemovedCount
+        }
+
+
+    $OEMVerificationSummary =
+        [PSCustomObject]@{
+
+            Status =
+                $OEMVerificationStatus
+
+            Manufacturer =
+                if ($OEMUpdateResult) {
+                    $OEMUpdateResult.Manufacturer
+                }
+                else {
+                    $Manufacturer
+                }
+
+            Tool =
+                if ($OEMUpdateResult) {
+                    $OEMUpdateResult.Tool
+                }
+                else {
+                    $null
+                }
+
+            ToolVersion =
+                if ($OEMUpdateResult) {
+                    $OEMUpdateResult.ToolVersion
+                }
+                else {
+                    $null
+                }
+
+            UpdateStatus =
+                if ($OEMUpdateResult) {
+                    $OEMUpdateResult.Status
+                }
+                else {
+                    $null
+                }
+
+            Recommendations =
+                if ($OEMUpdateResult) {
+                    $OEMUpdateResult.Recommendations
+                }
+                else {
+                    $null
+                }
+
+            Downloaded =
+                if ($OEMUpdateResult) {
+                    $OEMUpdateResult.Downloaded
+                }
+                else {
+                    $null
+                }
+
+            Installed =
+                if ($OEMUpdateResult) {
+                    $OEMUpdateResult.Installed
+                }
+                else {
+                    $null
+                }
+
+            Failed =
+                if ($OEMUpdateResult) {
+                    $OEMUpdateResult.Failed
+                }
+                else {
+                    $null
+                }
+
+            RestartRequired =
+                if ($OEMUpdateResult) {
+                    [bool]$OEMUpdateResult.RestartRequired
+                }
+                else {
+                    $false
+                }
+        }
+
+
+    # ========================================================
+    # PHASE 10.10 - ENRICH OEM RESULT WITH VERIFICATION V2
     # ========================================================
 
     if ($OEMUpdateResult) {
 
         try {
 
-            $ChangedCount =
-                @(
-                    $DriverComparison.Changed
-                ).Count
-
-
-            $AddedCount =
-                @(
-                    $DriverComparison.Added
-                ).Count
-
-
-            $RemovedCount =
-                @(
-                    $DriverComparison.Removed
-                ).Count
-
-
             $OEMUpdateResult.Verification =
                 [PSCustomObject]@{
 
-                    Status =
+                    SchemaVersion =
+                        2
+
+                    OverallStatus =
+                        $OverallVerificationStatus
+
+                    LegacyStatus =
                         $Status
 
-                    DeviceErrorsBefore =
-                        $BeforeCount
+                    DeviceHealth =
+                        $DeviceHealthSummary
 
-                    DeviceErrorsAfter =
-                        $AfterCount
-
-                    FixedDeviceErrors =
-                        $FixedCount
-
-                    RemainingDeviceErrors =
-                        $RemainingCount
-
-                    NewDeviceErrors =
-                        $NewCount
-
-                    DriverChanged =
-                        $ChangedCount
-
-                    DriverAdded =
-                        $AddedCount
-
-                    DriverRemoved =
-                        $RemovedCount
+                    DriverChanges =
+                        $DriverChangeSummary
 
                     RestartRequired =
                         $RestartRequired
+
+                    WindowsPendingRestart =
+                        [bool]$WindowsPendingRestart.Pending
+
+                    WindowsPendingRestartReasons =
+                        @(
+                            $WindowsPendingRestart.Reasons
+                        )
                 }
 
 
             if (
                 $OEMUpdateResult.Status -eq 'Success' -and
                 -not $RestartRequired -and
-                $ChangedCount -eq 0 -and
-                $AddedCount -eq 0 -and
-                $RemovedCount -eq 0 -and
-                $RemainingCount -eq 0 -and
-                $NewCount -eq 0
+                $DriverChangeStatus -eq 'NoChanges' -and
+                $DeviceHealthStatus -eq 'Healthy'
             ) {
 
                 $OEMUpdateResult.Status =
@@ -2425,18 +2631,18 @@ try {
 
             $OEMUpdateResult |
                 ConvertTo-Json `
-                    -Depth 10 |
+                    -Depth 12 |
                 Set-Content `
                     -LiteralPath $OEMUpdateResultFile `
                     -Encoding UTF8
 
 
             Write-Log -Message (
-                'OEM update result enriched by verification. ' +
-                "FinalStatus=$($OEMUpdateResult.Status); " +
-                "Changed=$ChangedCount; " +
-                "Added=$AddedCount; " +
-                "Removed=$RemovedCount."
+                'OEM update result enriched by Phase 10.10 verification. ' +
+                "Overall=$OverallVerificationStatus; " +
+                "DeviceHealth=$DeviceHealthStatus; " +
+                "DriverChanges=$DriverChangeStatus; " +
+                "OEM=$OEMVerificationStatus."
             )
         }
         catch {
@@ -2473,6 +2679,29 @@ try {
 
                     Model =
                         $Model
+                }
+
+
+            Summary =
+                [PSCustomObject]@{
+
+                    SchemaVersion =
+                        2
+
+                    OverallStatus =
+                        $OverallVerificationStatus
+
+                    RestartRequired =
+                        $RestartRequired
+
+                    DeviceHealth =
+                        $DeviceHealthSummary
+
+                    DriverChanges =
+                        $DriverChangeSummary
+
+                    OEMUpdate =
+                        $OEMVerificationSummary
                 }
 
 
@@ -2614,22 +2843,49 @@ try {
 
 
     # ========================================================
-    # CONSOLE SUMMARY
+    # PHASE 10.10 - VERIFICATION CONSOLE SUMMARY
     # ========================================================
 
     Write-Host ''
-    Write-Host '========================================'
-    Write-Host 'Driver Verification Summary'
-    Write-Host '========================================'
-    Write-Host "Before errors   : $BeforeCount"
-    Write-Host "After errors    : $AfterCount"
-    Write-Host "Fixed           : $FixedCount"
-    Write-Host "Remaining       : $RemainingCount"
-    Write-Host "New errors      : $NewCount"
-    Write-Host "Restart devices : $RestartDeviceCount"
-    Write-Host "Restart         : $RestartRequired"
-    Write-Host "Status          : $Status"
-    Write-Host '========================================'
+    Write-Host '============================================================'
+    Write-Host 'Driver Verification'
+    Write-Host '============================================================'
+    Write-Host "Overall Status    : $OverallVerificationStatus"
+    Write-Host "Restart Required  : $RestartRequired"
+    Write-Host ''
+
+    Write-Host 'Device Health'
+    Write-Host "Status            : $DeviceHealthStatus"
+    Write-Host "Errors Before     : $BeforeCount"
+    Write-Host "Errors After      : $AfterCount"
+    Write-Host "Fixed             : $FixedCount"
+    Write-Host "Remaining         : $RemainingCount"
+    Write-Host "New Errors        : $NewCount"
+    Write-Host "Restart Devices   : $RestartDeviceCount"
+    Write-Host ''
+
+    Write-Host 'Driver Changes'
+    Write-Host "Status            : $DriverChangeStatus"
+    Write-Host "Changed           : $ChangedCount"
+    Write-Host "Added             : $AddedCount"
+    Write-Host "Removed           : $RemovedCount"
+    Write-Host ''
+
+    Write-Host 'OEM Update'
+    Write-Host "Status            : $OEMVerificationStatus"
+
+    if ($OEMUpdateResult) {
+
+        Write-Host "Tool              : $($OEMUpdateResult.Tool)"
+        Write-Host "Tool Version      : $($OEMUpdateResult.ToolVersion)"
+        Write-Host "Update Status     : $($OEMUpdateResult.Status)"
+        Write-Host "Recommendations   : $($OEMUpdateResult.Recommendations)"
+        Write-Host "Downloaded        : $($OEMUpdateResult.Downloaded)"
+        Write-Host "Installed         : $($OEMUpdateResult.Installed)"
+        Write-Host "Failed            : $($OEMUpdateResult.Failed)"
+    }
+
+    Write-Host '============================================================'
     Write-Host ''
 
 

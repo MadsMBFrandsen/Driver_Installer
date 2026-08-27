@@ -3081,11 +3081,20 @@ try {
 
 
     $VerificationSummary = $null
+    $VerificationV2Summary = $null
     $DriverChangesSummary = $null
     $DriverSnapshotsSummary = $null
     $OEMToolsSummary = @()
 
     if ($DriverVerification) {
+
+        if ($DriverVerification.Summary) {
+
+            $VerificationV2Summary =
+                $DriverVerification.Summary
+        }
+
+
         $VerificationResults =
             if ($DriverVerification.Results) {
                 $DriverVerification.Results
@@ -3195,6 +3204,7 @@ try {
             Computer = $ComputerSummary
             UpdateDrivers = $UpdateSummary
             Verification = $VerificationSummary
+            VerificationV2 = $VerificationV2Summary
             DriverChanges = $DriverChangesSummary
             DriverSnapshots = $DriverSnapshotsSummary
             OEMTools = @($OEMToolsSummary)
@@ -3263,7 +3273,37 @@ try {
         Write-Host "Model            : $($ComputerSummary.Model)"
     }
 
-    if ($VerificationSummary) {
+    if ($VerificationV2Summary) {
+
+        Write-Host ''
+        Write-Host 'Verification'
+        Write-Host "Overall Status   : $($VerificationV2Summary.OverallStatus)"
+        Write-Host "Restart Required : $($VerificationV2Summary.RestartRequired)"
+
+        if ($VerificationV2Summary.DeviceHealth) {
+
+            Write-Host ''
+            Write-Host 'Device Health'
+            Write-Host "Status           : $($VerificationV2Summary.DeviceHealth.Status)"
+            Write-Host "Errors Before    : $($VerificationV2Summary.DeviceHealth.ErrorsBefore)"
+            Write-Host "Errors After     : $($VerificationV2Summary.DeviceHealth.ErrorsAfter)"
+            Write-Host "Fixed            : $($VerificationV2Summary.DeviceHealth.Fixed)"
+            Write-Host "Remaining        : $($VerificationV2Summary.DeviceHealth.Remaining)"
+            Write-Host "New Errors       : $($VerificationV2Summary.DeviceHealth.NewErrors)"
+        }
+
+        if ($VerificationV2Summary.DriverChanges) {
+
+            Write-Host ''
+            Write-Host 'Verified Driver Changes'
+            Write-Host "Status           : $($VerificationV2Summary.DriverChanges.Status)"
+            Write-Host "Changed          : $($VerificationV2Summary.DriverChanges.Changed)"
+            Write-Host "Added            : $($VerificationV2Summary.DriverChanges.Added)"
+            Write-Host "Removed          : $($VerificationV2Summary.DriverChanges.Removed)"
+        }
+    }
+    elseif ($VerificationSummary) {
+
         Write-Host ''
         Write-Host 'Verification'
         Write-Host "Errors Before    : $($VerificationSummary.DeviceErrorsBefore)"
@@ -3308,7 +3348,11 @@ try {
     }
 
 
-    if ($DriverChangesSummary) {
+    if (
+        $DriverChangesSummary -and
+        -not $VerificationV2Summary
+    ) {
+
         Write-Host ''
         Write-Host 'Driver Changes'
         Write-Host "Changed          : $($DriverChangesSummary.ChangedCount)"
