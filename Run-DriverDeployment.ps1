@@ -1869,7 +1869,7 @@ function Update-DriverRollbackManifestMetadata {
             $RollbackManifest |
                 Add-Member `
                     -NotePropertyName DeploymentSessionId `
-                    -NotePropertyValue (
+                    -NotePropertyValue $(
                         if ($script:DeploymentSession) {
                             $script:DeploymentSession.SessionId
                         }
