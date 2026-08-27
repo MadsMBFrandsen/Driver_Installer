@@ -191,10 +191,10 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.4.2'
+    '1.4.4'
 
 $ScriptUpdated =
-    '2026-08-26'
+    '2026-08-27'
 
 
 
@@ -4099,6 +4099,49 @@ function Invoke-DellDriverUpdate {
 # ============================================================
 # HP IMAGE ASSISTANT REPORTING
 # ============================================================
+function Get-HPImageAssistantPath {
+
+    $Candidates =
+        @(
+            (Join-Path $ToolsPath 'HPImageAssistant\HPImageAssistant.exe'),
+            (Join-Path $ToolsPath 'HP\HPIA\HPImageAssistant.exe'),
+            (Join-Path $env:ProgramFiles 'HP\HP Image Assistant\HPImageAssistant.exe')
+        )
+
+    if (${env:ProgramFiles(x86)}) {
+        $Candidates +=
+            Join-Path `
+                ${env:ProgramFiles(x86)} `
+                'HP\HP Image Assistant\HPImageAssistant.exe'
+    }
+
+    foreach ($Candidate in $Candidates) {
+        if (
+            -not [string]::IsNullOrWhiteSpace($Candidate) -and
+            (Test-Path -LiteralPath $Candidate -PathType Leaf)
+        ) {
+            return $Candidate
+        }
+    }
+
+    if (Test-Path -LiteralPath $ToolsPath) {
+        $Found =
+            Get-ChildItem `
+                -LiteralPath $ToolsPath `
+                -Filter 'HPImageAssistant.exe' `
+                -File `
+                -Recurse `
+                -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+        if ($Found) {
+            return $Found.FullName
+        }
+    }
+
+    return $null
+}
+
 
 function Write-HPIAReportSummary {
 
@@ -7431,3 +7474,4 @@ catch {
 
     exit 1
 }
+
