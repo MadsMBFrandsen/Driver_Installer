@@ -191,7 +191,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.4.9'
+    '1.5.0'
 
 $ScriptUpdated =
     '2026-08-27'
@@ -207,6 +207,17 @@ $ErrorActionPreference =
 # created once and reused by later LSUClient rounds.
 $script:LenovoLSURecoveryRepository =
     $null
+
+
+# Phase 10.5 Lenovo reporting telemetry.
+$script:LenovoUpdateTelemetry =
+    $null
+
+$script:LenovoCatalogRecoveryUsed =
+    $false
+
+$script:LenovoSystemUpdateFallbackUsed =
+    $false
 
 
 # ============================================================
@@ -7236,6 +7247,10 @@ function Invoke-LSUClientCatalogScanWithFallback {
     }
 
 
+    $script:LenovoCatalogRecoveryUsed =
+        $true
+
+
     $MachineType =
         Get-LenovoMachineType
 
@@ -7561,6 +7576,20 @@ function Invoke-LenovoLSUClientUpdate {
         'Starting Lenovo update scan/install through LSUClient.'
     )
 
+
+    $LSURoundsExecuted =
+        0
+
+    $LSURecommendations =
+        New-Object System.Collections.ArrayList
+
+    $LSUInstalled =
+        New-Object System.Collections.ArrayList
+
+    $LSUFailed =
+        New-Object System.Collections.ArrayList
+
+
     Initialize-LenovoLSUClient
 
     if (
@@ -7594,10 +7623,49 @@ function Invoke-LenovoLSUClientUpdate {
             "LENOVO LSUCLIENT ROUND $Round OF $MaximumLenovoLSURounds"
         )
 
+
+        $LSURoundsExecuted =
+            $Round
+
+
         $DiscoveredUpdates =
             @(
                 Get-LenovoLSUApplicableUpdates
             )
+
+        foreach (
+            $DiscoveredUpdate in $DiscoveredUpdates
+        ) {
+
+            $RecommendationKey =
+                (
+                    "$($DiscoveredUpdate.Title)|" +
+                    "$($DiscoveredUpdate.Version)|" +
+                    "$($DiscoveredUpdate.Type)"
+                )
+
+
+            if (-not (
+                @(
+                    $LSURecommendations |
+                    ForEach-Object {
+                        $_.Key
+                    }
+                ) -contains $RecommendationKey
+            )) {
+
+                [void]$LSURecommendations.Add(
+                    [PSCustomObject]@{
+                        Key = $RecommendationKey
+                        Title = [string]$DiscoveredUpdate.Title
+                        Version = [string]$DiscoveredUpdate.Version
+                        Type = [string]$DiscoveredUpdate.Type
+                        Severity = [string]$DiscoveredUpdate.Severity
+                    }
+                )
+            }
+        }
+
 
         if (
             $DiscoveredUpdates.Count -eq 0
@@ -7606,6 +7674,22 @@ function Invoke-LenovoLSUClientUpdate {
             Write-Log -Message (
                 "LSUClient round $Round found no selected updates."
             )
+
+
+            $script:LenovoUpdateTelemetry =
+                [PSCustomObject]@{
+                    Engine = 'LSUClient'
+                    RoundsExecuted = $LSURoundsExecuted
+                    Recommendations = @($LSURecommendations).Count
+                    Installed = @($LSUInstalled).Count
+                    Failed = @($LSUFailed).Count
+                    RecommendationItems = @($LSURecommendations)
+                    InstalledItems = @($LSUInstalled)
+                    FailedItems = @($LSUFailed)
+                    CatalogRecoveryUsed = $script:LenovoCatalogRecoveryUsed
+                    SystemUpdateFallbackUsed = $script:LenovoSystemUpdateFallbackUsed
+                }
+
 
             return
         }
@@ -7656,6 +7740,22 @@ function Invoke-LenovoLSUClientUpdate {
                 'installed successfully and waiting for restart. ' +
                 'No repeated installation will be attempted.'
             )
+
+
+            $script:LenovoUpdateTelemetry =
+                [PSCustomObject]@{
+                    Engine = 'LSUClient'
+                    RoundsExecuted = $LSURoundsExecuted
+                    Recommendations = @($LSURecommendations).Count
+                    Installed = @($LSUInstalled).Count
+                    Failed = @($LSUFailed).Count
+                    RecommendationItems = @($LSURecommendations)
+                    InstalledItems = @($LSUInstalled)
+                    FailedItems = @($LSUFailed)
+                    CatalogRecoveryUsed = $script:LenovoCatalogRecoveryUsed
+                    SystemUpdateFallbackUsed = $script:LenovoSystemUpdateFallbackUsed
+                }
+
 
             return
         }
@@ -7760,6 +7860,31 @@ function Invoke-LenovoLSUClientUpdate {
                 }
 
 
+                [void]$LSUFailed.Add(
+                    [PSCustomObject]@{
+                        Title = [string]$Update.Title
+                        Version = [string]$Update.Version
+                        Type = [string]$Update.Type
+                        Details = ($FailureDetails -join ' | ')
+                    }
+                )
+
+
+                $script:LenovoUpdateTelemetry =
+                    [PSCustomObject]@{
+                        Engine = 'LSUClient'
+                        RoundsExecuted = $LSURoundsExecuted
+                        Recommendations = @($LSURecommendations).Count
+                        Installed = @($LSUInstalled).Count
+                        Failed = @($LSUFailed).Count
+                        RecommendationItems = @($LSURecommendations)
+                        InstalledItems = @($LSUInstalled)
+                        FailedItems = @($LSUFailed)
+                        CatalogRecoveryUsed = $script:LenovoCatalogRecoveryUsed
+                        SystemUpdateFallbackUsed = $script:LenovoSystemUpdateFallbackUsed
+                    }
+
+
                 throw (
                     'LSUClient returned an unsuccessful install result for ' +
                     "'$($Update.Title)' version '$($Update.Version)'. " +
@@ -7773,6 +7898,40 @@ function Invoke-LenovoLSUClientUpdate {
             $RequiresRestart =
                 Test-LenovoLSUResultRequiresRestart `
                     -InstallResults $InstallResults
+
+
+            if ($InstallSucceeded) {
+
+                $InstalledKey =
+                    (
+                        "$($Update.Title)|" +
+                        "$($Update.Version)|" +
+                        "$($Update.Type)"
+                    )
+
+
+                if (-not (
+                    @(
+                        $LSUInstalled |
+                        ForEach-Object {
+                            $_.Key
+                        }
+                    ) -contains $InstalledKey
+                )) {
+
+                    [void]$LSUInstalled.Add(
+                        [PSCustomObject]@{
+                            Key = $InstalledKey
+                            Title = [string]$Update.Title
+                            Version = [string]$Update.Version
+                            Type = [string]$Update.Type
+                            Severity = [string]$Update.Severity
+                            Round = $Round
+                            RestartRequired = [bool]$RequiresRestart
+                        }
+                    )
+                }
+            }
 
 
             if (
@@ -7817,6 +7976,245 @@ function Invoke-LenovoLSUClientUpdate {
             }
         }
     }
+
+
+    $script:LenovoUpdateTelemetry =
+        [PSCustomObject]@{
+            Engine = 'LSUClient'
+            RoundsExecuted = $LSURoundsExecuted
+            Recommendations = @($LSURecommendations).Count
+            Installed = @($LSUInstalled).Count
+            Failed = @($LSUFailed).Count
+            RecommendationItems = @($LSURecommendations)
+            InstalledItems = @($LSUInstalled)
+            FailedItems = @($LSUFailed)
+            CatalogRecoveryUsed = $script:LenovoCatalogRecoveryUsed
+            SystemUpdateFallbackUsed = $script:LenovoSystemUpdateFallbackUsed
+        }
+}
+
+
+function Write-LenovoUpdateResult {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$Status,
+
+        [Parameter(Mandatory)]
+        [bool]$RestartRequired,
+
+        [AllowNull()]
+        [string]$Notes
+    )
+
+
+    try {
+
+        $LenovoWorkingPath =
+            Join-Path `
+                $WorkingPath `
+                'Lenovo'
+
+
+        if (-not (
+            Test-Path `
+                -LiteralPath $LenovoWorkingPath
+        )) {
+
+            New-Item `
+                -Path $LenovoWorkingPath `
+                -ItemType Directory `
+                -Force |
+            Out-Null
+        }
+
+
+        $ResultPath =
+            Join-Path `
+                $LenovoWorkingPath `
+                'LenovoUpdateResult.json'
+
+
+        $LSUModule =
+            Get-Module `
+                -ListAvailable `
+                -Name $LenovoLSUClientModuleName `
+                -ErrorAction SilentlyContinue |
+            Sort-Object Version -Descending |
+            Select-Object -First 1
+
+
+        $SystemUpdatePath =
+            Get-LenovoSystemUpdateShimPath
+
+
+        $SystemUpdateVersion =
+            $null
+
+
+        if (
+            $SystemUpdatePath -and
+            (
+                Test-Path `
+                    -LiteralPath $SystemUpdatePath `
+                    -PathType Leaf
+            )
+        ) {
+
+            try {
+
+                $SystemUpdateVersion =
+                    (
+                        Get-Item `
+                            -LiteralPath $SystemUpdatePath
+                    ).VersionInfo.FileVersion
+            }
+            catch {
+            }
+        }
+
+
+        $Telemetry =
+            $script:LenovoUpdateTelemetry
+
+
+        $Result =
+            [PSCustomObject]@{
+
+                SchemaVersion =
+                    1
+
+                GeneratedTime =
+                    Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+                PrimaryEngine =
+                    'LSUClient'
+
+                LSUClientVersion =
+                    if ($LSUModule) {
+                        [string]$LSUModule.Version
+                    }
+                    else {
+                        $null
+                    }
+
+                SystemUpdatePath =
+                    $SystemUpdatePath
+
+                SystemUpdateVersion =
+                    $SystemUpdateVersion
+
+                Status =
+                    $Status
+
+                RoundsExecuted =
+                    if ($Telemetry) {
+                        $Telemetry.RoundsExecuted
+                    }
+                    else {
+                        0
+                    }
+
+                Recommendations =
+                    if ($Telemetry) {
+                        $Telemetry.Recommendations
+                    }
+                    else {
+                        $null
+                    }
+
+                Installed =
+                    if ($Telemetry) {
+                        $Telemetry.Installed
+                    }
+                    else {
+                        $null
+                    }
+
+                Failed =
+                    if ($Telemetry) {
+                        $Telemetry.Failed
+                    }
+                    else {
+                        $null
+                    }
+
+                RecommendationItems =
+                    if ($Telemetry) {
+                        @($Telemetry.RecommendationItems)
+                    }
+                    else {
+                        @()
+                    }
+
+                InstalledItems =
+                    if ($Telemetry) {
+                        @($Telemetry.InstalledItems)
+                    }
+                    else {
+                        @()
+                    }
+
+                FailedItems =
+                    if ($Telemetry) {
+                        @($Telemetry.FailedItems)
+                    }
+                    else {
+                        @()
+                    }
+
+                CatalogRecoveryUsed =
+                    [bool]$script:LenovoCatalogRecoveryUsed
+
+                SystemUpdateFallbackUsed =
+                    [bool]$script:LenovoSystemUpdateFallbackUsed
+
+                RestartRequired =
+                    $RestartRequired
+
+                Notes =
+                    $Notes
+            }
+
+
+        $Result |
+            ConvertTo-Json `
+                -Depth 12 |
+            Set-Content `
+                -LiteralPath $ResultPath `
+                -Encoding UTF8
+
+
+        $script:LenovoUpdateTelemetry =
+            $Result
+
+
+        Write-Log -Message (
+            "Lenovo update result saved to '$ResultPath'."
+        )
+
+
+        Write-Log -Message (
+            'LENOVO UPDATE RESULT: ' +
+            "Status=$Status | " +
+            "Rounds=$($Result.RoundsExecuted) | " +
+            "Recommendations=$($Result.Recommendations) | " +
+            "Installed=$($Result.Installed) | " +
+            "Failed=$($Result.Failed) | " +
+            "CatalogRecovery=$($Result.CatalogRecoveryUsed) | " +
+            "SystemUpdateFallback=$($Result.SystemUpdateFallbackUsed) | " +
+            "RestartRequired=$RestartRequired"
+        )
+    }
+    catch {
+
+        Write-Log `
+            -Message (
+                'Unable to write LenovoUpdateResult.json. ' +
+                "Reason: $($_.Exception.Message)"
+            ) `
+            -Level 'WARNING'
+    }
 }
 
 
@@ -7825,6 +8223,16 @@ function Invoke-LenovoLSUClientUpdate {
 # ============================================================
 
 function Invoke-LenovoDriverUpdate {
+
+    $script:LenovoUpdateTelemetry =
+        $null
+
+    $script:LenovoCatalogRecoveryUsed =
+        $false
+
+    $script:LenovoSystemUpdateFallbackUsed =
+        $false
+
 
     Write-Log -Message (
         '============================================================'
@@ -7880,6 +8288,10 @@ function Invoke-LenovoDriverUpdate {
 
     if (-not $LSUSucceeded) {
 
+        $script:LenovoSystemUpdateFallbackUsed =
+            $true
+
+
         Write-Log -Message (
             '============================================================'
         )
@@ -7933,6 +8345,43 @@ function Invoke-LenovoDriverUpdate {
         -MaximumDownloadRetries $MaximumDownloadAttempts `
         -PassDelaySeconds $WindowsUpdatePassDelaySeconds `
         -RetryWaitSeconds $WindowsUpdateRetryWaitSeconds
+
+    $LenovoRestartRequired =
+        Test-Path `
+            -LiteralPath $RestartFile
+
+
+    $LenovoStatus =
+        if ($LenovoRestartRequired) {
+            'SuccessRestartRequired'
+        }
+        elseif (
+            $script:LenovoUpdateTelemetry -and
+            $script:LenovoUpdateTelemetry.Recommendations -eq 0
+        ) {
+            'SuccessNoUpdates'
+        }
+        elseif (
+            $script:LenovoSystemUpdateFallbackUsed -and
+            -not $LSUSucceeded
+        ) {
+            'Warning'
+        }
+        else {
+            'Success'
+        }
+
+
+    Write-LenovoUpdateResult `
+        -Status $LenovoStatus `
+        -RestartRequired $LenovoRestartRequired `
+        -Notes (
+            'Phase 10.5 Lenovo reporting. ' +
+            "LSUSucceeded=$LSUSucceeded; " +
+            "CatalogRecoveryUsed=$script:LenovoCatalogRecoveryUsed; " +
+            "SystemUpdateFallbackUsed=$script:LenovoSystemUpdateFallbackUsed."
+        )
+
 
     Write-Log -Message (
         'Lenovo driver update sequence completed.'
@@ -8845,6 +9294,55 @@ try {
 
             $OEMStatus =
                 'SuccessNoUpdates'
+        }
+    }
+
+
+    if (
+        $Manufacturer -match
+        'Lenovo' -and
+        $script:LenovoUpdateTelemetry
+    ) {
+
+        $OEMRecommendations =
+            $script:LenovoUpdateTelemetry.Recommendations
+
+        $OEMDownloaded =
+            $null
+
+        $OEMInstalled =
+            $script:LenovoUpdateTelemetry.Installed
+
+        $OEMFailed =
+            $script:LenovoUpdateTelemetry.Failed
+
+        $OEMNotes =
+            (
+                'Phase 10.5 Lenovo telemetry. ' +
+                "LenovoStatus=$($script:LenovoUpdateTelemetry.Status); " +
+                "Rounds=$($script:LenovoUpdateTelemetry.RoundsExecuted); " +
+                "CatalogRecovery=$($script:LenovoUpdateTelemetry.CatalogRecoveryUsed); " +
+                "SystemUpdateFallback=$($script:LenovoUpdateTelemetry.SystemUpdateFallbackUsed)."
+            )
+
+
+        if (
+            $script:LenovoUpdateTelemetry.Status -eq
+            'SuccessNoUpdates' -and
+            -not $OEMRestartRequired
+        ) {
+
+            $OEMStatus =
+                'SuccessNoUpdates'
+        }
+        elseif (
+            $script:LenovoUpdateTelemetry.Status -eq
+            'Warning' -and
+            -not $OEMRestartRequired
+        ) {
+
+            $OEMStatus =
+                'Warning'
         }
     }
 
