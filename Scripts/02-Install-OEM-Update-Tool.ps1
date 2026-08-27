@@ -34,55 +34,30 @@ $ErrorActionPreference =
 # CONTROLLER OPTIONS
 # ========================================================================
 
-function Get-ItinoBooleanOption {
+# ============================================================
+# PHASE 10.9 - SHARED COMMON HELPERS
+# ============================================================
 
-    param(
-        [Parameter(Mandatory)]
-        [string]$EnvironmentVariable,
+$ItinoCommonHelperPath =
+    Join-Path `
+        $PSScriptRoot `
+        'Common\Itino-DriverCommon.ps1'
 
-        [Parameter(Mandatory)]
-        [bool]$DefaultValue
+
+if (-not (
+    Test-Path `
+        -LiteralPath $ItinoCommonHelperPath `
+        -PathType Leaf
+)) {
+
+    throw (
+        'Required ITINO shared helper file was not found: ' +
+        $ItinoCommonHelperPath
     )
-
-
-    $Value =
-        [Environment]::GetEnvironmentVariable(
-            $EnvironmentVariable
-        )
-
-
-    if (
-        [string]::IsNullOrWhiteSpace(
-            $Value
-        )
-    ) {
-
-        return $DefaultValue
-    }
-
-
-    switch -Regex (
-        $Value.Trim()
-    ) {
-
-        '^(1|true|yes|on)$' {
-
-            return $true
-        }
-
-
-        '^(0|false|no|off)$' {
-
-            return $false
-        }
-
-
-        default {
-
-            return $DefaultValue
-        }
-    }
 }
+
+
+. $ItinoCommonHelperPath
 
 
 function Get-ItinoStringOption {

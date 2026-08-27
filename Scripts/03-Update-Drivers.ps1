@@ -191,7 +191,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.5.3'
+    '1.5.4'
 
 $ScriptUpdated =
     '2026-08-27'
@@ -238,56 +238,30 @@ $script:OEMFallbackTelemetry =
 # BOOLEAN ENVIRONMENT OPTION
 # ============================================================
 
-function Get-ItinoBooleanOption {
+# ============================================================
+# PHASE 10.9 - SHARED COMMON HELPERS
+# ============================================================
 
-    param(
-        [Parameter(Mandatory)]
-        [string]$EnvironmentVariable,
+$ItinoCommonHelperPath =
+    Join-Path `
+        $PSScriptRoot `
+        'Common\Itino-DriverCommon.ps1'
 
-        [Parameter(Mandatory)]
-        [bool]$DefaultValue
+
+if (-not (
+    Test-Path `
+        -LiteralPath $ItinoCommonHelperPath `
+        -PathType Leaf
+)) {
+
+    throw (
+        'Required ITINO shared helper file was not found: ' +
+        $ItinoCommonHelperPath
     )
-
-
-    $Value =
-        [Environment]::GetEnvironmentVariable(
-            $EnvironmentVariable
-        )
-
-
-    if (
-        [string]::IsNullOrWhiteSpace(
-            $Value
-        )
-    ) {
-
-        return $DefaultValue
-    }
-
-
-    switch -Regex (
-        $Value.Trim()
-    ) {
-
-        '^(1|true|yes|on)$' {
-
-            return $true
-        }
-
-
-        '^(0|false|no|off)$' {
-
-            return $false
-        }
-
-
-        default {
-
-            return $DefaultValue
-        }
-    }
 }
 
+
+. $ItinoCommonHelperPath
 
 
 function Get-ItinoIntegerOption {
@@ -655,121 +629,9 @@ function Write-Log {
 # START LOG RUN
 # ============================================================
 
-function Start-LogRun {
-
-    param(
-        [Parameter(Mandatory)]
-        [string]$ScriptName
-    )
-
-
-    $RunID =
-        (Get-Date -Format 'yyyyMMdd-HHmmss') +
-        '-' +
-        (
-            [guid]::NewGuid().
-                ToString('N').
-                Substring(0, 4).
-                ToUpper()
-        )
-
-
-    $Separator =
-        '=' * 75
-
-
-    $Header = @(
-        ''
-        ''
-        $Separator
-        'NEW SCRIPT RUN'
-        $Separator
-        "Run ID       : $RunID"
-        "Script       : $ScriptName"
-        "Computer     : $env:COMPUTERNAME"
-        "Start Time   : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-        $Separator
-        ''
-    )
-
-
-    if ($WriteLogFiles) {
-
-        Add-Content `
-            -LiteralPath $LogFile `
-            -Value $Header `
-            -Encoding UTF8
-    }
-
-
-    Write-Host ''
-    Write-Host $Separator
-    Write-Host 'NEW SCRIPT RUN'
-    Write-Host $Separator
-    Write-Host "Run ID       : $RunID"
-    Write-Host "Script       : $ScriptName"
-    Write-Host "Computer     : $env:COMPUTERNAME"
-    Write-Host "Start Time   : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    Write-Host $Separator
-    Write-Host ''
-
-
-    return $RunID
-}
-
-
 # ============================================================
 # STOP LOG RUN
 # ============================================================
-
-function Stop-LogRun {
-
-    param(
-        [Parameter(Mandatory)]
-        [string]$RunID,
-
-        [Parameter(Mandatory)]
-        [string]$Result
-    )
-
-
-    $Separator =
-        '=' * 75
-
-
-    $Footer = @(
-        ''
-        $Separator
-        'END SCRIPT RUN'
-        $Separator
-        "Run ID       : $RunID"
-        "Result       : $Result"
-        "End Time     : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-        $Separator
-        ''
-    )
-
-
-    if ($WriteLogFiles) {
-
-        Add-Content `
-            -LiteralPath $LogFile `
-            -Value $Footer `
-            -Encoding UTF8
-    }
-
-
-    Write-Host ''
-    Write-Host $Separator
-    Write-Host 'END SCRIPT RUN'
-    Write-Host $Separator
-    Write-Host "Run ID       : $RunID"
-    Write-Host "Result       : $Result"
-    Write-Host "End Time     : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    Write-Host $Separator
-    Write-Host ''
-}
-
 
 # ============================================================
 # ADMINISTRATOR CHECK
@@ -8838,6 +8700,8 @@ function Write-OEMUpdateResult {
                         PowerShell51ExitCodeFinalization = $true
                         CommonOEMSequence = 'Invoke-OEMDriverSequence'
                         CommonOEMSequenceVersion = 1
+                        SharedCommonHelpers = 'Common\Itino-DriverCommon.ps1'
+                        SharedCommonHelpersVersion = 1
                     }
 
                 Notes =
