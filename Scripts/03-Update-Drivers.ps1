@@ -191,7 +191,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.4.4'
+    '1.4.5'
 
 $ScriptUpdated =
     '2026-08-27'
@@ -4143,9 +4143,121 @@ function Get-HPImageAssistantPath {
 }
 
 
+function Get-HPIAOutputFiles {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$HPWorkingPath,
+
+        [Parameter(Mandatory)]
+        [string]$ReportFolder,
+
+        [Parameter(Mandatory)]
+        [string]$DownloadFolder
+    )
+
+
+    $SearchRoots =
+        @(
+            $ReportFolder,
+            $DownloadFolder,
+            $HPWorkingPath
+        ) |
+        Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_)
+        } |
+        Select-Object -Unique
+
+
+    $AllowedExtensions =
+        @(
+            '.xml',
+            '.html',
+            '.htm',
+            '.csv',
+            '.txt',
+            '.log'
+        )
+
+
+    $Files =
+        New-Object System.Collections.ArrayList
+
+
+    foreach (
+        $SearchRoot in $SearchRoots
+    ) {
+
+        if (-not (
+            Test-Path -LiteralPath $SearchRoot
+        )) {
+
+            continue
+        }
+
+
+        $FoundFiles =
+            @(
+                Get-ChildItem `
+                    -LiteralPath $SearchRoot `
+                    -File `
+                    -Recurse `
+                    -ErrorAction SilentlyContinue |
+                Where-Object {
+
+                    (
+                        $AllowedExtensions -contains
+                        $_.Extension.ToLowerInvariant()
+                    ) -or
+                    (
+                        $_.Name -match
+                        '(?i)^readme'
+                    )
+                }
+            )
+
+
+        foreach (
+            $FoundFile in $FoundFiles
+        ) {
+
+            $AlreadyAdded =
+                @(
+                    $Files |
+                    Where-Object {
+                        $_.FullName -eq
+                        $FoundFile.FullName
+                    }
+                )
+
+
+            if (
+                $AlreadyAdded.Count -eq 0
+            ) {
+
+                [void]$Files.Add(
+                    $FoundFile
+                )
+            }
+        }
+    }
+
+
+    return @(
+        $Files |
+        Sort-Object `
+            LastWriteTime,
+            FullName
+    )
+}
+
+
 function Write-HPIAReportSummary {
 
     param(
+        [Parameter(Mandatory)]
+        [string]$HPWorkingPath,
+
         [Parameter(Mandatory)]
         [string]$ReportFolder,
 
@@ -4159,7 +4271,13 @@ function Write-HPIAReportSummary {
         [string]$ResultFile,
 
         [Parameter(Mandatory)]
-        [string]$DownloadFolder
+        [string]$DownloadFolder,
+
+        [Parameter(Mandatory)]
+        [bool]$ExitCodeAvailable,
+
+        [AllowNull()]
+        [Nullable[int]]$ExitCode
     )
 
 
@@ -4181,55 +4299,61 @@ function Write-HPIAReportSummary {
     )
 
 
-    if (
-        Test-Path -LiteralPath $RecommendationXml
+    $ExplicitReportFiles =
+        @(
+            $RecommendationXml,
+            $RecommendationHtml,
+            $ResultFile
+        )
+
+
+    $ExistingExplicitReports =
+        @(
+            $ExplicitReportFiles |
+            Where-Object {
+                Test-Path -LiteralPath $_
+            }
+        )
+
+
+    foreach (
+        $ExplicitReport in
+        $ExistingExplicitReports
     ) {
 
         Write-Log -Message (
-            "HPIA recommendation XML: $RecommendationXml"
+            "HPIA explicit report found: $ExplicitReport"
         )
     }
-    else {
-
-        Write-Log `
-            -Message (
-                "HPIA recommendation XML was not created: $RecommendationXml"
-            ) `
-            -Level 'WARNING'
-    }
 
 
-    if (
-        Test-Path -LiteralPath $RecommendationHtml
+    $DiscoveredOutputFiles =
+        @(
+            Get-HPIAOutputFiles `
+                -HPWorkingPath $HPWorkingPath `
+                -ReportFolder $ReportFolder `
+                -DownloadFolder $DownloadFolder
+        )
+
+
+    Write-Log -Message (
+        "HPIA discovered output file count: $($DiscoveredOutputFiles.Count)"
+    )
+
+
+    foreach (
+        $DiscoveredFile in
+        $DiscoveredOutputFiles
     ) {
 
         Write-Log -Message (
-            "HPIA recommendation HTML: $RecommendationHtml"
+            'HPIA OUTPUT: ' +
+            "$($DiscoveredFile.Name) | " +
+            "Size=$($DiscoveredFile.Length) bytes | " +
+            "Path=$($DiscoveredFile.FullName)"
         )
     }
 
-
-    if (
-        Test-Path -LiteralPath $ResultFile
-    ) {
-
-        Write-Log -Message (
-            "HPIA install result file: $ResultFile"
-        )
-    }
-    else {
-
-        Write-Log `
-            -Message (
-                "HPIA install result file was not created: $ResultFile"
-            ) `
-            -Level 'WARNING'
-    }
-
-
-    # --------------------------------------------------------
-    # DOWNLOADED SOFTPAQ INVENTORY
-    # --------------------------------------------------------
 
     $SoftPaqFiles =
         @(
@@ -4275,7 +4399,7 @@ function Write-HPIAReportSummary {
         }
         catch {
 
-            # File version metadata is optional.
+            # Version metadata is optional.
         }
 
 
@@ -4322,26 +4446,56 @@ function Write-HPIAReportSummary {
 
 
     # --------------------------------------------------------
-    # BEST-EFFORT XML RECOMMENDATION SUMMARY
+    # BEST-EFFORT RECOMMENDATION XML PARSING
     #
-    # HPIA report schemas can differ between releases.
-    # Therefore this parser deliberately does not assume one
-    # fixed XML structure. It looks for leaf values belonging
-    # to nodes that contain an SPxxxxx identifier.
-    #
-    # Parser problems are warnings only and can never stop
-    # driver deployment.
+    # Prefer the requested XML path.
+    # If HPIA used another filename, automatically use the first
+    # discovered XML file from the HP output tree.
     # --------------------------------------------------------
+
+    $XmlToParse =
+        $null
+
 
     if (
         Test-Path -LiteralPath $RecommendationXml
     ) {
 
+        $XmlToParse =
+            $RecommendationXml
+    }
+    else {
+
+        $XmlCandidate =
+            @(
+                $DiscoveredOutputFiles |
+                Where-Object {
+                    $_.Extension -ieq '.xml'
+                }
+            ) |
+            Select-Object -First 1
+
+
+        if ($XmlCandidate) {
+
+            $XmlToParse =
+                $XmlCandidate.FullName
+        }
+    }
+
+
+    if ($XmlToParse) {
+
+        Write-Log -Message (
+            "HPIA XML selected for parsing: $XmlToParse"
+        )
+
+
         try {
 
             [xml]$RecommendationDocument =
                 Get-Content `
-                    -LiteralPath $RecommendationXml `
+                    -LiteralPath $XmlToParse `
                     -Raw `
                     -ErrorAction Stop
 
@@ -4463,7 +4617,9 @@ function Write-HPIAReportSummary {
                     )
 
 
-                if ($Existing.Count -eq 0) {
+                if (
+                    $Existing.Count -eq 0
+                ) {
 
                     [void]$RecommendationItems.Add(
                         [PSCustomObject]@{
@@ -4499,7 +4655,7 @@ function Write-HPIAReportSummary {
 
             Write-Log `
                 -Message (
-                    'Unable to parse HPIA recommendation XML. ' +
+                    'Unable to parse HPIA XML output. ' +
                     'The HPIA run itself is not affected. ' +
                     "Reason: $($_.Exception.Message)"
                 ) `
@@ -4508,11 +4664,52 @@ function Write-HPIAReportSummary {
     }
 
 
+    # --------------------------------------------------------
+    # INTERPRET "NO FILES / NO SOFTPAQS"
+    # --------------------------------------------------------
+
+    if (
+        $ExitCodeAvailable -and
+        $ExitCode -eq 0 -and
+        $SoftPaqFiles.Count -eq 0
+    ) {
+
+        if (
+            $DiscoveredOutputFiles.Count -eq 0
+        ) {
+
+            Write-Log -Message (
+                'HPIA completed successfully and downloaded no SoftPaqs. ' +
+                'HPIA also created no report/output files. This is treated ' +
+                'as an informational no-work result, not a failure.'
+            )
+        }
+        else {
+
+            Write-Log -Message (
+                'HPIA completed successfully and downloaded no SoftPaqs. ' +
+                'Any available HPIA output files are listed above.'
+            )
+        }
+    }
+    elseif (
+        -not $ExitCodeAvailable -and
+        $SoftPaqFiles.Count -eq 0
+    ) {
+
+        Write-Log `
+            -Message (
+                'HPIA downloaded no SoftPaqs and the process exit code was ' +
+                'not available. Continuing with final Windows Update.'
+            ) `
+            -Level 'WARNING'
+    }
+
+
     Write-Log -Message (
         '============================================================'
     )
 }
-
 
 function Invoke-HPDriverUpdate {
 
@@ -4661,11 +4858,14 @@ function Invoke-HPDriverUpdate {
     try {
 
         Write-HPIAReportSummary `
+            -HPWorkingPath $HPWorkingPath `
             -ReportFolder $ReportFolder `
             -RecommendationXml $RecommendationXml `
             -RecommendationHtml $RecommendationHtml `
             -ResultFile $ResultFile `
-            -DownloadFolder $DownloadFolder
+            -DownloadFolder $DownloadFolder `
+            -ExitCodeAvailable $Process.ExitCodeAvailable `
+            -ExitCode $Process.ExitCode
     }
     catch {
 
@@ -7474,4 +7674,5 @@ catch {
 
     exit 1
 }
+
 
