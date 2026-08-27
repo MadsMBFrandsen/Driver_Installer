@@ -191,7 +191,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.4.7'
+    '1.4.8'
 
 $ScriptUpdated =
     '2026-08-27'
@@ -4464,6 +4464,10 @@ function Write-HPIAReportSummary {
     # discovered XML file from the HP output tree.
     # --------------------------------------------------------
 
+    $RecommendationItems =
+        New-Object System.Collections.ArrayList
+
+
     $XmlToParse =
         $null
 
@@ -4509,10 +4513,6 @@ function Write-HPIAReportSummary {
                     -LiteralPath $XmlToParse `
                     -Raw `
                     -ErrorAction Stop
-
-
-            $RecommendationItems =
-                New-Object System.Collections.ArrayList
 
 
             $Nodes =
@@ -4720,9 +4720,230 @@ function Write-HPIAReportSummary {
     Write-Log -Message (
         '============================================================'
     )
+
+
+    # ========================================================
+    # PHASE 10.3 - RETURN STRUCTURED HPIA TELEMETRY
+    # ========================================================
+
+    return [PSCustomObject]@{
+
+        Recommendations =
+            @(
+                $RecommendationItems
+            ).Count
+
+        Downloaded =
+            @(
+                $SoftPaqFiles
+            ).Count
+
+        OutputFileCount =
+            @(
+                $DiscoveredOutputFiles
+            ).Count
+
+        OutputFiles =
+            @(
+                $DiscoveredOutputFiles |
+                ForEach-Object {
+                    $_.FullName
+                }
+            )
+
+        SoftPaqs =
+            @(
+                $SoftPaqFiles |
+                ForEach-Object {
+                    $_.BaseName.ToUpperInvariant()
+                }
+            )
+
+        RecommendationXml =
+            $XmlToParse
+
+        ExitCodeAvailable =
+            $ExitCodeAvailable
+
+        ExitCode =
+            $ExitCode
+    }
 }
 
+function Write-HPUpdateResult {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$HPWorkingPath,
+
+        [Parameter(Mandatory)]
+        [string]$HPIAPath,
+
+        [AllowNull()]
+        [object]$Summary,
+
+        [Parameter(Mandatory)]
+        [string]$Status,
+
+        [Parameter(Mandatory)]
+        [bool]$RestartRequired,
+
+        [Parameter(Mandatory)]
+        [bool]$ExitCodeAvailable,
+
+        [AllowNull()]
+        [Nullable[int]]$ExitCode,
+
+        [AllowNull()]
+        [string]$Notes
+    )
+
+
+    try {
+
+        $ResultPath =
+            Join-Path `
+                $HPWorkingPath `
+                'HPUpdateResult.json'
+
+
+        $HPIAVersion =
+            $null
+
+
+        try {
+
+            $HPIAVersion =
+                (
+                    Get-Item `
+                        -LiteralPath $HPIAPath `
+                        -ErrorAction Stop
+                ).VersionInfo.FileVersion
+        }
+        catch {
+        }
+
+
+        $Result =
+            [PSCustomObject]@{
+
+                SchemaVersion =
+                    1
+
+                GeneratedTime =
+                    Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+                Tool =
+                    'HP Image Assistant'
+
+                ToolVersion =
+                    $HPIAVersion
+
+                ToolPath =
+                    $HPIAPath
+
+                Status =
+                    $Status
+
+                Recommendations =
+                    if ($Summary) {
+                        $Summary.Recommendations
+                    }
+                    else {
+                        $null
+                    }
+
+                Downloaded =
+                    if ($Summary) {
+                        $Summary.Downloaded
+                    }
+                    else {
+                        $null
+                    }
+
+                OutputFileCount =
+                    if ($Summary) {
+                        $Summary.OutputFileCount
+                    }
+                    else {
+                        $null
+                    }
+
+                OutputFiles =
+                    if ($Summary) {
+                        @(
+                            $Summary.OutputFiles
+                        )
+                    }
+                    else {
+                        @()
+                    }
+
+                SoftPaqs =
+                    if ($Summary) {
+                        @(
+                            $Summary.SoftPaqs
+                        )
+                    }
+                    else {
+                        @()
+                    }
+
+                RecommendationXml =
+                    if ($Summary) {
+                        $Summary.RecommendationXml
+                    }
+                    else {
+                        $null
+                    }
+
+                RestartRequired =
+                    $RestartRequired
+
+                ExitCodeAvailable =
+                    $ExitCodeAvailable
+
+                ExitCode =
+                    $ExitCode
+
+                Notes =
+                    $Notes
+            }
+
+
+        $Result |
+            ConvertTo-Json `
+                -Depth 10 |
+            Set-Content `
+                -LiteralPath $ResultPath `
+                -Encoding UTF8
+
+
+        Write-Log -Message (
+            "HP update result saved to '$ResultPath'."
+        )
+
+
+        $script:HPUpdateTelemetry =
+            $Result
+    }
+    catch {
+
+        Write-Log `
+            -Message (
+                'Unable to write HPUpdateResult.json. ' +
+                "Reason: $($_.Exception.Message)"
+            ) `
+            -Level 'WARNING'
+    }
+}
+
+
 function Invoke-HPDriverUpdate {
+
+    $script:HPUpdateTelemetry =
+        $null
+
 
     Write-Log -Message (
         'Starting HP Image Assistant driver update.'
@@ -4868,15 +5089,16 @@ function Invoke-HPDriverUpdate {
 
     try {
 
-        Write-HPIAReportSummary `
-            -HPWorkingPath $HPWorkingPath `
-            -ReportFolder $ReportFolder `
-            -RecommendationXml $RecommendationXml `
-            -RecommendationHtml $RecommendationHtml `
-            -ResultFile $ResultFile `
-            -DownloadFolder $DownloadFolder `
-            -ExitCodeAvailable $Process.ExitCodeAvailable `
-            -ExitCode $Process.ExitCode
+        $HPIASummary =
+            Write-HPIAReportSummary `
+                -HPWorkingPath $HPWorkingPath `
+                -ReportFolder $ReportFolder `
+                -RecommendationXml $RecommendationXml `
+                -RecommendationHtml $RecommendationHtml `
+                -ResultFile $ResultFile `
+                -DownloadFolder $DownloadFolder `
+                -ExitCodeAvailable $Process.ExitCodeAvailable `
+                -ExitCode $Process.ExitCode
     }
     catch {
 
@@ -4887,6 +5109,22 @@ function Invoke-HPDriverUpdate {
                 "Reason: $($_.Exception.Message)"
             ) `
             -Level 'WARNING'
+    }
+
+
+    if (-not $HPIASummary) {
+
+        $HPIASummary =
+            [PSCustomObject]@{
+                Recommendations = $null
+                Downloaded = $null
+                OutputFileCount = $null
+                OutputFiles = @()
+                SoftPaqs = @()
+                RecommendationXml = $null
+                ExitCodeAvailable = $Process.ExitCodeAvailable
+                ExitCode = $Process.ExitCode
+            }
     }
 
 
@@ -4901,6 +5139,17 @@ function Invoke-HPDriverUpdate {
                 'Update instead of treating this as a hard failure.'
             ) `
             -Level 'WARNING'
+
+
+        Write-HPUpdateResult `
+            -HPWorkingPath $HPWorkingPath `
+            -HPIAPath $HPIA `
+            -Summary $HPIASummary `
+            -Status 'Warning' `
+            -RestartRequired $false `
+            -ExitCodeAvailable $false `
+            -ExitCode $null `
+            -Notes 'HPIA completed but its native exit code was unavailable.'
 
 
         return
@@ -4930,6 +5179,17 @@ function Invoke-HPDriverUpdate {
         )
 
 
+        Write-HPUpdateResult `
+            -HPWorkingPath $HPWorkingPath `
+            -HPIAPath $HPIA `
+            -Summary $HPIASummary `
+            -Status 'SuccessNoUpdates' `
+            -RestartRequired $false `
+            -ExitCodeAvailable $true `
+            -ExitCode $Process.ExitCode `
+            -Notes 'HPIA reported no applicable selected recommendations.'
+
+
         return
     }
 
@@ -4948,6 +5208,17 @@ function Invoke-HPDriverUpdate {
             'HP Image Assistant installed updates successfully and ' +
             'requested a restart.'
         )
+
+
+        Write-HPUpdateResult `
+            -HPWorkingPath $HPWorkingPath `
+            -HPIAPath $HPIA `
+            -Summary $HPIASummary `
+            -Status 'SuccessRestartRequired' `
+            -RestartRequired $true `
+            -ExitCodeAvailable $true `
+            -ExitCode $Process.ExitCode `
+            -Notes 'HPIA installed updates and requested a restart.'
 
 
         return
@@ -4971,6 +5242,17 @@ function Invoke-HPDriverUpdate {
             -Level 'WARNING'
 
 
+        Write-HPUpdateResult `
+            -HPWorkingPath $HPWorkingPath `
+            -HPIAPath $HPIA `
+            -Summary $HPIASummary `
+            -Status 'Warning' `
+            -RestartRequired $false `
+            -ExitCodeAvailable $true `
+            -ExitCode $Process.ExitCode `
+            -Notes 'HPIA skipped at least one SoftPaq because it was not auto-installable.'
+
+
         return
     }
 
@@ -4979,11 +5261,46 @@ function Invoke-HPDriverUpdate {
         $Process.ExitCode -ne 0
     ) {
 
+        Write-HPUpdateResult `
+            -HPWorkingPath $HPWorkingPath `
+            -HPIAPath $HPIA `
+            -Summary $HPIASummary `
+            -Status 'Failed' `
+            -RestartRequired $false `
+            -ExitCodeAvailable $true `
+            -ExitCode $Process.ExitCode `
+            -Notes 'HPIA returned a failure exit code.'
+
+
         throw (
             'HP Image Assistant failed. ' +
             "Exit code: $($Process.ExitCode)"
         )
     }
+
+
+    $HPStatus =
+        if (
+            $HPIASummary -and
+            $HPIASummary.Recommendations -eq 0 -and
+            $HPIASummary.Downloaded -eq 0
+        ) {
+            'SuccessNoUpdates'
+        }
+        else {
+            'Success'
+        }
+
+
+    Write-HPUpdateResult `
+        -HPWorkingPath $HPWorkingPath `
+        -HPIAPath $HPIA `
+        -Summary $HPIASummary `
+        -Status $HPStatus `
+        -RestartRequired $false `
+        -ExitCodeAvailable $true `
+        -ExitCode $Process.ExitCode `
+        -Notes 'HPIA completed successfully.'
 
 
     Write-Log -Message (
@@ -7939,16 +8256,79 @@ try {
         }
 
 
+    $OEMRecommendations =
+        $null
+
+    $OEMDownloaded =
+        $null
+
+    $OEMInstalled =
+        $null
+
+    $OEMFailed =
+        0
+
+    $OEMNotes =
+        'Phase 10.2 normalized OEM result written by 03-Update-Drivers.ps1.'
+
+
+    if (
+        $Manufacturer -match
+        'HP|Hewlett' -and
+        $script:HPUpdateTelemetry
+    ) {
+
+        $OEMRecommendations =
+            $script:HPUpdateTelemetry.Recommendations
+
+        $OEMDownloaded =
+            $script:HPUpdateTelemetry.Downloaded
+
+        $OEMNotes =
+            (
+                'Phase 10.3 HP telemetry. ' +
+                "HPIAStatus=$($script:HPUpdateTelemetry.Status); " +
+                "HPIAExitCode=$($script:HPUpdateTelemetry.ExitCode); " +
+                "OutputFiles=$($script:HPUpdateTelemetry.OutputFileCount)."
+            )
+
+
+        if (
+            $script:HPUpdateTelemetry.Status -eq
+            'Warning' -and
+            -not $OEMRestartRequired
+        ) {
+
+            $OEMStatus =
+                'Warning'
+
+            $OEMFailed =
+                $null
+        }
+        elseif (
+            $script:HPUpdateTelemetry.Status -eq
+            'Failed'
+        ) {
+
+            $OEMStatus =
+                'Failed'
+
+            $OEMFailed =
+                $null
+        }
+    }
+
+
     Write-OEMUpdateResult `
         -Manufacturer $Manufacturer `
         -Status $OEMStatus `
         -RestartRequired $OEMRestartRequired `
         -ExitCode $OEMExitCode `
-        -Recommendations $null `
-        -Downloaded $null `
-        -Installed $null `
-        -Failed 0 `
-        -Notes 'Phase 10.2 normalized OEM result written by 03-Update-Drivers.ps1.'
+        -Recommendations $OEMRecommendations `
+        -Downloaded $OEMDownloaded `
+        -Installed $OEMInstalled `
+        -Failed $OEMFailed `
+        -Notes $OEMNotes
 
 
 
