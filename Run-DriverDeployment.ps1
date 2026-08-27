@@ -230,7 +230,7 @@ $KeepErrorLogOnFailure =
 # deletion after a successful deployment.
 
 $CleanupAfterDeployment =
-    $false
+    $true
 
 
 # Copy the AutoResume log and console transcript files to the
