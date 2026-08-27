@@ -17,6 +17,7 @@
         - Preserves or creates RestartRequired.txt when required
         - Saves DriverVerification.json
         - Inventories installed Dell, HP and Lenovo driver-management tools
+        - Phase 10.0: Detects the current and future permanent HP Image Assistant paths
 
     Logging is controlled by Run-DriverDeployment.ps1 through:
 
@@ -1157,29 +1158,110 @@ function Find-FirstExistingFile {
 
 function Find-HPImageAssistant {
 
-    $PossibleRoots =
+    # ========================================================
+    # PHASE 10.0 - HPIA DETECTION CONSISTENCY
+    #
+    # Detection order:
+    #   1. Future permanent ITINO/HP location
+    #   2. Other known Program Files HPIA locations
+    #   3. Current temporary location prepared by script 02
+    #   4. Older ITINO / HP fallback locations
+    #
+    # Exact executable paths are checked first so verification
+    # reports the same HPIA instance that 02 and 03 actually use.
+    # ========================================================
+
+    $ExactCandidates =
         @(
+            'C:\Program Files\HP\HP Image Assistant\HPImageAssistant.exe'
+
+            'C:\Program Files\HP\HPIA\HPImageAssistant.exe'
+
+            'C:\Program Files (x86)\HP\HP Image Assistant\HPImageAssistant.exe'
+
+            'C:\Program Files (x86)\HP\HPIA\HPImageAssistant.exe'
+
+            (
+                Join-Path `
+                    $BasePath `
+                    'Tools\HPImageAssistant\HPImageAssistant.exe'
+            )
+
+            (
+                Join-Path `
+                    $BasePath `
+                    'Tools\HP\HPIA\HPImageAssistant.exe'
+            )
+
+            'C:\ProgramData\HP\HPIA\HPImageAssistant.exe'
+        )
+
+
+    foreach (
+        $Candidate in $ExactCandidates
+    ) {
+
+        if (
+            -not [string]::IsNullOrWhiteSpace(
+                [string]$Candidate
+            ) -and
+            (
+                Test-Path `
+                    -LiteralPath $Candidate `
+                    -PathType Leaf
+            )
+        ) {
+
+            return $Candidate
+        }
+    }
+
+
+    # ========================================================
+    # RECURSIVE FALLBACK
+    #
+    # This is intentionally secondary. It keeps compatibility
+    # with older/non-standard HPIA extraction layouts without
+    # overriding the preferred exact paths above.
+    # ========================================================
+
+    $FallbackRoots =
+        @(
+            (
+                Join-Path `
+                    $BasePath `
+                    'Tools\HPImageAssistant'
+            )
+
             (
                 Join-Path `
                     $BasePath `
                     'Tools\HP\HPIA'
             )
 
-            'C:\Program Files\HP\HPIA'
+            'C:\Program Files\HP'
 
-            'C:\Program Files (x86)\HP\HPIA'
+            'C:\Program Files (x86)\HP'
 
             'C:\ProgramData\HP\HPIA'
         )
 
 
     foreach (
-        $Root in $PossibleRoots
+        $Root in $FallbackRoots |
+        Select-Object -Unique
     ) {
 
-        if (-not (
-            Test-Path -LiteralPath $Root
-        )) {
+        if (
+            [string]::IsNullOrWhiteSpace(
+                [string]$Root
+            ) -or
+            -not (
+                Test-Path `
+                    -LiteralPath $Root `
+                    -PathType Container
+            )
+        ) {
 
             continue
         }
@@ -1204,6 +1286,7 @@ function Find-HPImageAssistant {
         }
         catch {
 
+            # Inventory detection must remain best-effort.
         }
     }
 
