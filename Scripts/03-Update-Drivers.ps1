@@ -191,7 +191,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.4.8'
+    '1.4.9'
 
 $ScriptUpdated =
     '2026-08-27'
@@ -3714,7 +3714,322 @@ function Invoke-DellDCUWithRetry {
     }
 }
 
+# ============================================================
+# PHASE 10.4 - DELL COMMAND UPDATE REPORTING
+# ============================================================
+
+function Get-DellUpdateItemSummary {
+
+    param(
+        [AllowNull()]
+        [object[]]$Updates
+    )
+
+
+    $Items =
+        @()
+
+
+    foreach (
+        $Update in @($Updates)
+    ) {
+
+        if (-not $Update) {
+            continue
+        }
+
+
+        $Items +=
+            [PSCustomObject]@{
+
+                Name =
+                    [string]$Update.name
+
+                Version =
+                    [string]$Update.version
+
+                Type =
+                    [string]$Update.type
+
+                Urgency =
+                    [string]$Update.urgency
+
+                Category =
+                    [string]$Update.category
+
+                ReleaseID =
+                    [string]$Update.releaseID
+
+                DellVersion =
+                    [string]$Update.dellVersion
+            }
+    }
+
+
+    return @($Items)
+}
+
+
+function Write-DellUpdateResult {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$DellWorkingPath,
+
+        [Parameter(Mandatory)]
+        [string]$DCUPath,
+
+        [Parameter(Mandatory)]
+        [string]$Status,
+
+        [AllowNull()]
+        [Nullable[int]]$ApplicableUpdates,
+
+        [AllowNull()]
+        [Nullable[int]]$AppliedUpdates,
+
+        [AllowNull()]
+        [object[]]$UpdateItems,
+
+        [AllowNull()]
+        [object]$ScanResult,
+
+        [AllowNull()]
+        [object]$ApplyResult,
+
+        [Parameter(Mandatory)]
+        [bool]$RestartRequired,
+
+        [AllowNull()]
+        [string]$ScanReportPath,
+
+        [AllowNull()]
+        [string]$ScanLogPath,
+
+        [AllowNull()]
+        [string]$ApplyLogPath,
+
+        [AllowNull()]
+        [string]$Notes
+    )
+
+
+    try {
+
+        $ResultPath =
+            Join-Path `
+                $DellWorkingPath `
+                'DellUpdateResult.json'
+
+
+        $DCUVersion =
+            $null
+
+
+        try {
+
+            $DCUVersion =
+                (
+                    Get-Item `
+                        -LiteralPath $DCUPath `
+                        -ErrorAction Stop
+                ).VersionInfo.FileVersion
+        }
+        catch {
+        }
+
+
+        $ScanExitCode =
+            $null
+
+        $ScanCategory =
+            $null
+
+        $ScanDescription =
+            $null
+
+        $ScanAttempts =
+            $null
+
+
+        if ($ScanResult) {
+
+            $ScanAttempts =
+                $ScanResult.Attempts
+
+
+            if ($ScanResult.ExitInfo) {
+
+                $ScanExitCode =
+                    $ScanResult.ExitInfo.ExitCode
+
+                $ScanCategory =
+                    $ScanResult.ExitInfo.Category
+
+                $ScanDescription =
+                    $ScanResult.ExitInfo.Description
+            }
+        }
+
+
+        $ApplyExitCode =
+            $null
+
+        $ApplyCategory =
+            $null
+
+        $ApplyDescription =
+            $null
+
+        $ApplyAttempts =
+            $null
+
+
+        if ($ApplyResult) {
+
+            $ApplyAttempts =
+                $ApplyResult.Attempts
+
+
+            if ($ApplyResult.ExitInfo) {
+
+                $ApplyExitCode =
+                    $ApplyResult.ExitInfo.ExitCode
+
+                $ApplyCategory =
+                    $ApplyResult.ExitInfo.Category
+
+                $ApplyDescription =
+                    $ApplyResult.ExitInfo.Description
+            }
+        }
+
+
+        $Result =
+            [PSCustomObject]@{
+
+                SchemaVersion =
+                    1
+
+                GeneratedTime =
+                    Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+                Tool =
+                    'Dell Command Update'
+
+                ToolVersion =
+                    $DCUVersion
+
+                ToolPath =
+                    $DCUPath
+
+                Status =
+                    $Status
+
+                ApplicableUpdates =
+                    $ApplicableUpdates
+
+                AppliedUpdates =
+                    $AppliedUpdates
+
+                UpdateItems =
+                    @(
+                        $UpdateItems
+                    )
+
+                Scan =
+                    [PSCustomObject]@{
+
+                        Attempts =
+                            $ScanAttempts
+
+                        ExitCode =
+                            $ScanExitCode
+
+                        Category =
+                            $ScanCategory
+
+                        Description =
+                            $ScanDescription
+
+                        ReportPath =
+                            $ScanReportPath
+
+                        LogPath =
+                            $ScanLogPath
+                    }
+
+                Apply =
+                    [PSCustomObject]@{
+
+                        Attempts =
+                            $ApplyAttempts
+
+                        ExitCode =
+                            $ApplyExitCode
+
+                        Category =
+                            $ApplyCategory
+
+                        Description =
+                            $ApplyDescription
+
+                        LogPath =
+                            $ApplyLogPath
+                    }
+
+                RestartRequired =
+                    $RestartRequired
+
+                Notes =
+                    $Notes
+            }
+
+
+        $Result |
+            ConvertTo-Json `
+                -Depth 12 |
+            Set-Content `
+                -LiteralPath $ResultPath `
+                -Encoding UTF8
+
+
+        Write-Log -Message (
+            "Dell update result saved to '$ResultPath'."
+        )
+
+
+        Write-Log -Message (
+            'DELL UPDATE RESULT: ' +
+            "Status=$Status | " +
+            "Applicable=$ApplicableUpdates | " +
+            "Applied=$AppliedUpdates | " +
+            "ScanExit=$ScanExitCode | " +
+            "ApplyExit=$ApplyExitCode | " +
+            "RestartRequired=$RestartRequired"
+        )
+
+
+        $script:DellUpdateTelemetry =
+            $Result
+    }
+    catch {
+
+        Write-Log `
+            -Message (
+                'Unable to write DellUpdateResult.json. ' +
+                "Reason: $($_.Exception.Message)"
+            ) `
+            -Level 'WARNING'
+    }
+}
+
+
 function Invoke-DellDriverUpdate {
+
+    $script:DellUpdateTelemetry =
+        $null
+
 
     Write-Log -Message (
         'Starting Dell Command Update driver update.'
@@ -3790,6 +4105,18 @@ function Invoke-DellDriverUpdate {
         Join-Path `
             $DellScanReportPath `
             'DCUApplicableUpdates.xml'
+
+
+    $ApplicableCount =
+        $null
+
+
+    $DellUpdateItems =
+        @()
+
+
+    $ApplyResult =
+        $null
 
 
     # ========================================================
@@ -3877,6 +4204,22 @@ function Invoke-DellDriverUpdate {
         )
 
 
+        Write-DellUpdateResult `
+            -DellWorkingPath $DellWorkingPath `
+            -DCUPath $DCU `
+            -Status 'SuccessNoUpdates' `
+            -ApplicableUpdates 0 `
+            -AppliedUpdates 0 `
+            -UpdateItems @() `
+            -ScanResult $ScanResult `
+            -ApplyResult $null `
+            -RestartRequired $false `
+            -ScanReportPath $ApplicableUpdatesXml `
+            -ScanLogPath $ScanLog `
+            -ApplyLogPath $ApplyLog `
+            -Notes 'Dell scan reported no applicable driver updates.'
+
+
         return
     }
 
@@ -3900,6 +4243,22 @@ function Invoke-DellDriverUpdate {
             -Level 'WARNING'
 
 
+        Write-DellUpdateResult `
+            -DellWorkingPath $DellWorkingPath `
+            -DCUPath $DCU `
+            -Status 'SuccessRestartRequired' `
+            -ApplicableUpdates $null `
+            -AppliedUpdates $null `
+            -UpdateItems @() `
+            -ScanResult $ScanResult `
+            -ApplyResult $null `
+            -RestartRequired $true `
+            -ScanReportPath $ApplicableUpdatesXml `
+            -ScanLogPath $ScanLog `
+            -ApplyLogPath $ApplyLog `
+            -Notes 'Dell scan requires Windows restart before updates can continue.'
+
+
         return
     }
 
@@ -3907,6 +4266,22 @@ function Invoke-DellDriverUpdate {
     if (
         $ScanInfo.Category -ne 'Success'
     ) {
+
+        Write-DellUpdateResult `
+            -DellWorkingPath $DellWorkingPath `
+            -DCUPath $DCU `
+            -Status 'Failed' `
+            -ApplicableUpdates $null `
+            -AppliedUpdates $null `
+            -UpdateItems @() `
+            -ScanResult $ScanResult `
+            -ApplyResult $null `
+            -RestartRequired $false `
+            -ScanReportPath $ApplicableUpdatesXml `
+            -ScanLogPath $ScanLog `
+            -ApplyLogPath $ApplyLog `
+            -Notes 'Dell Command Update scan failed.'
+
 
         throw (
             'Dell Command Update scan failed. ' +
@@ -3929,6 +4304,22 @@ function Invoke-DellDriverUpdate {
             'DCUApplicableUpdates.xml report was generated. ' +
             'Treating this as no applicable driver updates.'
         )
+
+
+        Write-DellUpdateResult `
+            -DellWorkingPath $DellWorkingPath `
+            -DCUPath $DCU `
+            -Status 'SuccessNoUpdates' `
+            -ApplicableUpdates 0 `
+            -AppliedUpdates 0 `
+            -UpdateItems @() `
+            -ScanResult $ScanResult `
+            -ApplyResult $null `
+            -RestartRequired $false `
+            -ScanReportPath $ApplicableUpdatesXml `
+            -ScanLogPath $ScanLog `
+            -ApplyLogPath $ApplyLog `
+            -Notes 'Dell scan succeeded but generated no applicable-update report.'
 
 
         return
@@ -3956,6 +4347,25 @@ function Invoke-DellDriverUpdate {
     }
     catch {
 
+        Write-DellUpdateResult `
+            -DellWorkingPath $DellWorkingPath `
+            -DCUPath $DCU `
+            -Status 'Failed' `
+            -ApplicableUpdates $null `
+            -AppliedUpdates $null `
+            -UpdateItems @() `
+            -ScanResult $ScanResult `
+            -ApplyResult $null `
+            -RestartRequired $false `
+            -ScanReportPath $ApplicableUpdatesXml `
+            -ScanLogPath $ScanLog `
+            -ApplyLogPath $ApplyLog `
+            -Notes (
+                'Unable to parse Dell DCU applicable-updates report. ' +
+                "Reason: $($_.Exception.Message)"
+            )
+
+
         throw (
             'Unable to parse Dell DCU applicable-updates report. ' +
             "Reason: $($_.Exception.Message)"
@@ -3978,6 +4388,13 @@ function Invoke-DellDriverUpdate {
     )
 
 
+    $DellUpdateItems =
+        @(
+            Get-DellUpdateItemSummary `
+                -Updates $ApplicableUpdates
+        )
+
+
     if (
         $ApplicableCount -eq 0
     ) {
@@ -3986,6 +4403,22 @@ function Invoke-DellDriverUpdate {
             'Dell Command Update fresh scan found no applicable driver updates. ' +
             'Skipping /applyUpdates.'
         )
+
+
+        Write-DellUpdateResult `
+            -DellWorkingPath $DellWorkingPath `
+            -DCUPath $DCU `
+            -Status 'SuccessNoUpdates' `
+            -ApplicableUpdates 0 `
+            -AppliedUpdates 0 `
+            -UpdateItems $DellUpdateItems `
+            -ScanResult $ScanResult `
+            -ApplyResult $null `
+            -RestartRequired $false `
+            -ScanReportPath $ApplicableUpdatesXml `
+            -ScanLogPath $ScanLog `
+            -ApplyLogPath $ApplyLog `
+            -Notes 'Dell scan report contained zero applicable driver updates.'
 
 
         return
@@ -4074,6 +4507,22 @@ function Invoke-DellDriverUpdate {
         )
 
 
+        Write-DellUpdateResult `
+            -DellWorkingPath $DellWorkingPath `
+            -DCUPath $DCU `
+            -Status 'SuccessRestartRequired' `
+            -ApplicableUpdates $ApplicableCount `
+            -AppliedUpdates $ApplicableCount `
+            -UpdateItems $DellUpdateItems `
+            -ScanResult $ScanResult `
+            -ApplyResult $ApplyResult `
+            -RestartRequired $true `
+            -ScanReportPath $ApplicableUpdatesXml `
+            -ScanLogPath $ScanLog `
+            -ApplyLogPath $ApplyLog `
+            -Notes 'Dell apply completed and requested a restart.'
+
+
         return
     }
 
@@ -4082,12 +4531,44 @@ function Invoke-DellDriverUpdate {
         $ApplyInfo.Category -ne 'Success'
     ) {
 
+        Write-DellUpdateResult `
+            -DellWorkingPath $DellWorkingPath `
+            -DCUPath $DCU `
+            -Status 'Failed' `
+            -ApplicableUpdates $ApplicableCount `
+            -AppliedUpdates $null `
+            -UpdateItems $DellUpdateItems `
+            -ScanResult $ScanResult `
+            -ApplyResult $ApplyResult `
+            -RestartRequired $false `
+            -ScanReportPath $ApplicableUpdatesXml `
+            -ScanLogPath $ScanLog `
+            -ApplyLogPath $ApplyLog `
+            -Notes 'Dell Command Update apply failed.'
+
+
         throw (
             'Dell Command Update apply failed. ' +
             "Exit code: $($ApplyInfo.ExitCode). " +
             "$($ApplyInfo.Description)"
         )
     }
+
+
+    Write-DellUpdateResult `
+        -DellWorkingPath $DellWorkingPath `
+        -DCUPath $DCU `
+        -Status 'Success' `
+        -ApplicableUpdates $ApplicableCount `
+        -AppliedUpdates $ApplicableCount `
+        -UpdateItems $DellUpdateItems `
+        -ScanResult $ScanResult `
+        -ApplyResult $ApplyResult `
+        -RestartRequired $false `
+        -ScanReportPath $ApplicableUpdatesXml `
+        -ScanLogPath $ScanLog `
+        -ApplyLogPath $ApplyLog `
+        -Notes 'Dell Command Update apply completed successfully.'
 
 
     Write-Log -Message (
@@ -8315,6 +8796,55 @@ try {
 
             $OEMFailed =
                 $null
+        }
+    }
+
+
+    if (
+        $Manufacturer -match
+        'Dell' -and
+        $script:DellUpdateTelemetry
+    ) {
+
+        $OEMRecommendations =
+            $script:DellUpdateTelemetry.ApplicableUpdates
+
+        $OEMDownloaded =
+            $null
+
+        $OEMInstalled =
+            $script:DellUpdateTelemetry.AppliedUpdates
+
+        $OEMNotes =
+            (
+                'Phase 10.4 Dell telemetry. ' +
+                "DellStatus=$($script:DellUpdateTelemetry.Status); " +
+                "ScanExit=$($script:DellUpdateTelemetry.Scan.ExitCode); " +
+                "ScanAttempts=$($script:DellUpdateTelemetry.Scan.Attempts); " +
+                "ApplyExit=$($script:DellUpdateTelemetry.Apply.ExitCode); " +
+                "ApplyAttempts=$($script:DellUpdateTelemetry.Apply.Attempts)."
+            )
+
+
+        if (
+            $script:DellUpdateTelemetry.Status -eq
+            'Failed'
+        ) {
+
+            $OEMStatus =
+                'Failed'
+
+            $OEMFailed =
+                $null
+        }
+        elseif (
+            $script:DellUpdateTelemetry.Status -eq
+            'SuccessNoUpdates' -and
+            -not $OEMRestartRequired
+        ) {
+
+            $OEMStatus =
+                'SuccessNoUpdates'
         }
     }
 
