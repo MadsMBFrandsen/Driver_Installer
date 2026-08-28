@@ -136,16 +136,155 @@ $CopiedLogsRoot =
         $CopiedLogsFolderName
 
 
-$CopiedAutoResumeLogDirectory =
-    Join-Path `
-        $CopiedLogsRoot `
-        $env:COMPUTERNAME
+$DeploymentStateFile =
+    'C:\ProgramData\Itino\DriverDeploymentState.json'
 
 
-$CopiedAutoResumeLogPath =
-    Join-Path `
-        $CopiedAutoResumeLogDirectory `
-        'AutoResume.log'
+$script:ControllerExecutionCompleted =
+    $false
+
+
+function Get-ItinoManufacturerFolder {
+
+    try {
+
+        $Manufacturer =
+            [string](
+                Get-CimInstance `
+                    -ClassName Win32_ComputerSystem `
+                    -ErrorAction Stop
+            ).Manufacturer
+    }
+    catch {
+
+        $Manufacturer =
+            'Unknown'
+    }
+
+
+    switch -Regex ($Manufacturer) {
+
+        'HP|Hewlett' {
+            return 'Hp'
+        }
+
+        'LENOVO' {
+            return 'Lenovo'
+        }
+
+        'DELL' {
+            return 'Dell'
+        }
+
+        default {
+
+            if (
+                [string]::IsNullOrWhiteSpace(
+                    $Manufacturer
+                )
+            ) {
+                return 'Unknown'
+            }
+
+
+            return (
+                $Manufacturer `
+                    -replace '[\\/:*?"<>|]', '_'
+            ).Trim()
+        }
+    }
+}
+
+
+function Get-ItinoUsbSessionDirectory {
+
+    $ManufacturerFolder =
+        Get-ItinoManufacturerFolder
+
+
+    $ComputerDirectory =
+        Join-Path `
+            (
+                Join-Path `
+                    $CopiedLogsRoot `
+                    $ManufacturerFolder
+            ) `
+            $env:COMPUTERNAME
+
+
+    $SessionId =
+        $null
+
+
+    if (
+        Test-Path `
+            -LiteralPath $DeploymentStateFile `
+            -PathType Leaf
+    ) {
+
+        try {
+
+            $State =
+                Get-Content `
+                    -LiteralPath $DeploymentStateFile `
+                    -Raw `
+                    -ErrorAction Stop |
+                ConvertFrom-Json `
+                    -ErrorAction Stop
+
+
+            $SessionId =
+                [string]$State.SessionId
+        }
+        catch {
+        }
+    }
+
+
+    if (
+        -not [string]::IsNullOrWhiteSpace(
+            $SessionId
+        )
+    ) {
+
+        return (
+            Join-Path `
+                $ComputerDirectory `
+                $SessionId
+        )
+    }
+
+
+    # On final exit 0 the controller may already have deleted
+    # C:\ProgramData\Itino. The controller copies the session
+    # logs to USB before that cleanup, so use the newest session
+    # folder as the final logging destination.
+    if (
+        Test-Path `
+            -LiteralPath $ComputerDirectory `
+            -PathType Container
+    ) {
+
+        $NewestSessionDirectory =
+            Get-ChildItem `
+                -LiteralPath $ComputerDirectory `
+                -Directory `
+                -ErrorAction SilentlyContinue |
+            Sort-Object `
+                -Property LastWriteTime `
+                -Descending |
+            Select-Object `
+                -First 1
+
+
+        if ($NewestSessionDirectory) {
+            return $NewestSessionDirectory.FullName
+        }
+    }
+
+
+    return $null
+}
 
 
 # Dedicated wrapper log. This is separate from the controller
@@ -181,19 +320,6 @@ function Write-AutoResumeLog {
 
     try {
 
-        if (-not (
-            Test-Path -LiteralPath $AutoResumeLogDirectory
-        )) {
-
-            New-Item `
-                -ItemType Directory `
-                -Path $AutoResumeLogDirectory `
-                -Force `
-                -ErrorAction Stop |
-            Out-Null
-        }
-
-
         $Line =
             (
                 '[{0}] [{1}] {2}' -f
@@ -203,23 +329,28 @@ function Write-AutoResumeLog {
             )
 
 
-        Add-Content `
-            -LiteralPath $AutoResumeLogPath `
-            -Value $Line `
-            -Encoding UTF8 `
-            -ErrorAction Stop
-
-
-        if ($CopyLogsToScriptLocation) {
+        # Before/during controller execution, ProgramData is the
+        # working AutoResume log. After the controller has
+        # completed, do NOT recreate DriverDeployment if final
+        # cleanup already removed C:\ProgramData\Itino.
+        if (
+            (
+                Test-Path `
+                    -LiteralPath $AutoResumeLogDirectory `
+                    -PathType Container
+            ) -or
+            (-not $script:ControllerExecutionCompleted)
+        ) {
 
             if (-not (
                 Test-Path `
-                    -LiteralPath $CopiedAutoResumeLogDirectory
+                    -LiteralPath $AutoResumeLogDirectory `
+                    -PathType Container
             )) {
 
                 New-Item `
                     -ItemType Directory `
-                    -Path $CopiedAutoResumeLogDirectory `
+                    -Path $AutoResumeLogDirectory `
                     -Force `
                     -ErrorAction Stop |
                 Out-Null
@@ -227,10 +358,52 @@ function Write-AutoResumeLog {
 
 
             Add-Content `
-                -LiteralPath $CopiedAutoResumeLogPath `
+                -LiteralPath $AutoResumeLogPath `
                 -Value $Line `
                 -Encoding UTF8 `
                 -ErrorAction Stop
+        }
+
+
+        if ($CopyLogsToScriptLocation) {
+
+            $UsbSessionDirectory =
+                Get-ItinoUsbSessionDirectory
+
+
+            if (
+                -not [string]::IsNullOrWhiteSpace(
+                    $UsbSessionDirectory
+                )
+            ) {
+
+                if (-not (
+                    Test-Path `
+                        -LiteralPath $UsbSessionDirectory `
+                        -PathType Container
+                )) {
+
+                    New-Item `
+                        -ItemType Directory `
+                        -Path $UsbSessionDirectory `
+                        -Force `
+                        -ErrorAction Stop |
+                    Out-Null
+                }
+
+
+                $UsbAutoResumeLogPath =
+                    Join-Path `
+                        $UsbSessionDirectory `
+                        'AutoResume.log'
+
+
+                Add-Content `
+                    -LiteralPath $UsbAutoResumeLogPath `
+                    -Value $Line `
+                    -Encoding UTF8 `
+                    -ErrorAction Stop
+            }
         }
     }
     catch {
@@ -582,6 +755,10 @@ Write-AutoResumeLog -Message (
 
 $ControllerExitCode =
     [int]$LASTEXITCODE
+
+
+$script:ControllerExecutionCompleted =
+    $true
 
 
 Write-Host ''

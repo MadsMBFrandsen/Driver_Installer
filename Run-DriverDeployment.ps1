@@ -134,7 +134,7 @@ $ScriptName =
 # ------------------------------------------------------------
 
 $ScriptVersion =
-    '1.1.12'
+    '1.1.13'
 
 $ScriptUpdated =
     '2026-08-27'
@@ -230,7 +230,7 @@ $KeepErrorLogOnFailure =
 # deletion after a successful deployment.
 
 $CleanupAfterDeployment =
-    $true
+    $false
 
 
 # Copy the AutoResume log and console transcript files to the
@@ -876,9 +876,127 @@ function Copy-ItinoLogsToScriptLocation {
             }
 
 
+        $Manufacturer =
+            $null
+
+
+        if (
+            Test-Path `
+                -LiteralPath $HardwareFile `
+                -PathType Leaf
+        ) {
+
+            try {
+
+                $HardwareData =
+                    Get-Content `
+                        -LiteralPath $HardwareFile `
+                        -Raw `
+                        -ErrorAction Stop |
+                    ConvertFrom-Json `
+                        -ErrorAction Stop
+
+
+                $Manufacturer =
+                    [string]$HardwareData.ComputerSystem.Manufacturer
+
+
+                if (
+                    [string]::IsNullOrWhiteSpace(
+                        $Manufacturer
+                    )
+                ) {
+
+                    $Manufacturer =
+                        [string]$HardwareData.Manufacturer
+                }
+            }
+            catch {
+            }
+        }
+
+
+        if (
+            [string]::IsNullOrWhiteSpace(
+                $Manufacturer
+            )
+        ) {
+
+            try {
+
+                $Manufacturer =
+                    [string](
+                        Get-CimInstance `
+                            -ClassName Win32_ComputerSystem `
+                            -ErrorAction Stop
+                    ).Manufacturer
+            }
+            catch {
+
+                $Manufacturer =
+                    'Unknown'
+            }
+        }
+
+
+        switch -Regex ($Manufacturer) {
+
+            'HP|Hewlett' {
+                $ManufacturerFolder =
+                    'Hp'
+
+                break
+            }
+
+            'LENOVO' {
+                $ManufacturerFolder =
+                    'Lenovo'
+
+                break
+            }
+
+            'DELL' {
+                $ManufacturerFolder =
+                    'Dell'
+
+                break
+            }
+
+            default {
+
+                $ManufacturerFolder =
+                    if (
+                        [string]::IsNullOrWhiteSpace(
+                            $Manufacturer
+                        )
+                    ) {
+                        'Unknown'
+                    }
+                    else {
+                        (
+                            $Manufacturer `
+                                -replace '[\\/:*?"<>|]', '_'
+                        ).Trim()
+                    }
+            }
+        }
+
+
+        $ManufacturerDirectory =
+            Join-Path `
+                $CopiedLogsRoot `
+                $ManufacturerFolder
+
+
+        $ComputerDirectory =
+            Join-Path `
+                $ManufacturerDirectory `
+                $env:COMPUTERNAME
+
+
         $DestinationDirectory =
             Join-Path `
-                (Join-Path $CopiedLogsRoot $env:COMPUTERNAME) `
+                $ComputerDirectory `
                 $SessionId
 
 
