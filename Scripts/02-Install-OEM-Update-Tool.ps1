@@ -1441,10 +1441,78 @@ function Install-DellCommandUpdate {
         Get-DellCommandUpdateExecutable
 
 
+    $InstalledVersion =
+        $null
+
+
     if ($ExistingExecutable) {
 
         Write-Log -Message (
             "Existing Dell Command Update found: $ExistingExecutable"
+        )
+
+
+        $InstalledVersion =
+            Get-ExecutableVersion `
+                -Path $ExistingExecutable
+
+
+        Write-Log -Message (
+            "Installed Dell Command Update version: $InstalledVersion"
+        )
+
+
+        # ====================================================
+        # QUICK VERSION CHECK BEFORE INSTALLER DOWNLOAD
+        # ====================================================
+        #
+        # Only resolve Dell's lightweight version metadata here.
+        # Do NOT call Get-DellCommandUpdateInstaller until we
+        # know the installed copy is missing or outdated.
+        # ====================================================
+
+        $LatestInformation =
+            Get-LatestDellCommandUpdateInformation
+
+
+        Write-Log -Message (
+            "Latest available Dell Command Update version: " +
+            "$($LatestInformation.Version)"
+        )
+
+
+        if (
+            $InstalledVersion -and
+            $LatestInformation.Version -and
+            $InstalledVersion -ge $LatestInformation.Version
+        ) {
+
+            Write-Log -Message (
+                'Installed Dell Command Update version is current or newer.'
+            )
+
+
+            Test-InstallerSignature `
+                -Path $ExistingExecutable `
+                -ExpectedPublisher @(
+                    'Dell'
+                ) |
+                Out-Null
+
+
+            Write-Log -Message (
+                'Dell Command Update is already ready. ' +
+                'Installer download skipped.'
+            )
+
+
+            return
+        }
+
+
+        Write-Log -Message (
+            'Installed Dell Command Update is older than the ' +
+            'latest available version. Downloading the installer.'
         )
     }
     else {
@@ -1455,33 +1523,20 @@ function Install-DellCommandUpdate {
     }
 
 
+    # ========================================================
+    # GET INSTALLER ONLY WHEN NEEDED
+    # ========================================================
+
     $InstallerInformation =
-    Get-DellCommandUpdateInstaller
+        Get-DellCommandUpdateInstaller
 
 
-	$Installer =
-		$InstallerInformation.Path
+    $Installer =
+        $InstallerInformation.Path
 
 
-	$InstallerVersion =
-		$InstallerInformation.Version
-
-
-    $InstalledVersion =
-        $null
-
-
-    if ($ExistingExecutable) {
-
-        $InstalledVersion =
-            Get-ExecutableVersion `
-                -Path $ExistingExecutable
-    }
-
-
-    Write-Log -Message (
-        "Installed Dell Command Update version: $InstalledVersion"
-    )
+    $InstallerVersion =
+        $InstallerInformation.Version
 
 
     Write-Log -Message (
@@ -1489,7 +1544,11 @@ function Install-DellCommandUpdate {
     )
 
 
+    # Packaged installers can have a version that differs from
+    # the online metadata checked above. Keep the final version
+    # guard before running the installer.
     if (
+        $ExistingExecutable -and
         $InstalledVersion -and
         $InstallerVersion -and
         $InstalledVersion -ge $InstallerVersion
@@ -1497,6 +1556,20 @@ function Install-DellCommandUpdate {
 
         Write-Log -Message (
             'Installed Dell Command Update version is current or newer.'
+        )
+
+
+        Test-InstallerSignature `
+            -Path $ExistingExecutable `
+            -ExpectedPublisher @(
+                'Dell'
+            ) |
+            Out-Null
+
+
+        Write-Log -Message (
+            'Dell Command Update is already ready. ' +
+            'Installer execution skipped.'
         )
 
 
