@@ -21,6 +21,15 @@
 #
 # The script never restarts Windows.
 # ========================================================================
+#
+# PHASE 10.16 - OEM INSTALLER PRE-DOWNLOAD OPTIMIZATION
+#
+# Dell, HP and Lenovo now check the installed OEM tool before
+# downloading the full installer. Current/newer validated tools
+# are reused and the installer download is skipped.
+#
+# Date: 2026-08-31
+# ========================================================================
 
 [CmdletBinding()]
 param()
@@ -1506,6 +1515,15 @@ function Install-DellCommandUpdate {
             )
 
 
+            Write-Log -Message (
+                'OEM INSTALLER DECISION: Manufacturer=DELL | ' +
+                'Installed=True | ' +
+                "InstalledVersion=$InstalledVersion | " +
+                "AvailableVersion=$($LatestInformation.Version) | " +
+                'DownloadRequired=False | Reason=CurrentOrNewer'
+            )
+
+
             return
         }
 
@@ -1514,11 +1532,28 @@ function Install-DellCommandUpdate {
             'Installed Dell Command Update is older than the ' +
             'latest available version. Downloading the installer.'
         )
+
+
+        Write-Log -Message (
+            'OEM INSTALLER DECISION: Manufacturer=DELL | ' +
+            'Installed=True | ' +
+            "InstalledVersion=$InstalledVersion | " +
+            "AvailableVersion=$($LatestInformation.Version) | " +
+            'DownloadRequired=True | Reason=Outdated'
+        )
     }
     else {
 
         Write-Log -Message (
             'Dell Command Update is not currently installed.'
+        )
+
+
+        Write-Log -Message (
+            'OEM INSTALLER DECISION: Manufacturer=DELL | ' +
+            'Installed=False | InstalledVersion= | ' +
+            'AvailableVersion=PendingResolution | ' +
+            'DownloadRequired=True | Reason=Missing'
         )
     }
 
@@ -2277,12 +2312,21 @@ function Install-HPImageAssistant {
         )
 
 
-        return
+        Write-Log -Message (
+            'Migrated HPIA will be checked against the latest ' +
+            'available version before reuse.'
+        )
     }
 
 
+    $InstalledVersion =
+        $null
+
+
     if (
-        Test-Path -LiteralPath $HPIAExecutable
+        Test-Path `
+            -LiteralPath $HPIAExecutable `
+            -PathType Leaf
     ) {
 
         Write-Log -Message (
@@ -2300,12 +2344,83 @@ function Install-HPImageAssistant {
             Out-Null
 
 
+        $InstalledVersion =
+            Get-ExecutableVersion `
+                -Path $HPIAExecutable
+
+
         Write-Log -Message (
-            'Permanent HP Image Assistant is already ready.'
+            "Installed HP Image Assistant version: $InstalledVersion"
         )
 
 
-        return
+        $LatestInformation =
+            Get-LatestHPImageAssistantInformation
+
+
+        Write-Log -Message (
+            'Latest available HP Image Assistant version: ' +
+            "$($LatestInformation.Version)"
+        )
+
+
+        if (
+            $InstalledVersion -and
+            $LatestInformation.Version -and
+            $InstalledVersion -ge $LatestInformation.Version
+        ) {
+
+            Write-Log -Message (
+                'Installed HP Image Assistant version is current or newer.'
+            )
+
+
+            Write-Log -Message (
+                'Permanent HP Image Assistant is already ready. ' +
+                'Installer download skipped.'
+            )
+
+
+            Write-Log -Message (
+                'OEM INSTALLER DECISION: Manufacturer=HP | ' +
+                'Installed=True | ' +
+                "InstalledVersion=$InstalledVersion | " +
+                "AvailableVersion=$($LatestInformation.Version) | " +
+                'DownloadRequired=False | Reason=CurrentOrNewer'
+            )
+
+
+            return
+        }
+
+
+        Write-Log -Message (
+            'Installed HP Image Assistant is older than the latest ' +
+            'available version. Downloading the installer.'
+        )
+
+
+        Write-Log -Message (
+            'OEM INSTALLER DECISION: Manufacturer=HP | ' +
+            'Installed=True | ' +
+            "InstalledVersion=$InstalledVersion | " +
+            "AvailableVersion=$($LatestInformation.Version) | " +
+            'DownloadRequired=True | Reason=Outdated'
+        )
+    }
+    else {
+
+        Write-Log -Message (
+            'HP Image Assistant is not currently installed.'
+        )
+
+
+        Write-Log -Message (
+            'OEM INSTALLER DECISION: Manufacturer=HP | ' +
+            'Installed=False | InstalledVersion= | ' +
+            'AvailableVersion=PendingResolution | ' +
+            'DownloadRequired=True | Reason=Missing'
+        )
     }
 
 
@@ -2332,6 +2447,28 @@ function Install-HPImageAssistant {
     Write-Log -Message (
         "HP installer source: $($InstallerInformation.Source)"
     )
+
+
+    if (
+        $InstalledVersion -and
+        $InstallerVersion -and
+        $InstalledVersion -ge $InstallerVersion
+    ) {
+
+        Write-Log -Message (
+            'Installed HP Image Assistant version is current or newer ' +
+            'than the selected installer.'
+        )
+
+
+        Write-Log -Message (
+            'HP Image Assistant installer execution skipped.'
+        )
+
+
+        return
+    }
+
 
     if (
         Test-Path -LiteralPath $ExtractionPath
@@ -2931,7 +3068,16 @@ function Install-LenovoSystemUpdate {
 
 
         Write-Log -Message (
-            'Lenovo System Update is ready.'
+            'Lenovo System Update is ready. Installer download skipped.'
+        )
+
+
+        Write-Log -Message (
+            'OEM INSTALLER DECISION: Manufacturer=LENOVO | ' +
+            'Installed=True | ' +
+            "InstalledVersion=$InstalledVersion | " +
+            "AvailableVersion=$($LatestInformation.Version) | " +
+            'DownloadRequired=False | Reason=CurrentOrNewer'
         )
 
 
@@ -2942,6 +3088,27 @@ function Install-LenovoSystemUpdate {
     # ========================================================
     # GET INSTALLER
     # ========================================================
+
+    if ($Existing) {
+
+        Write-Log -Message (
+            'OEM INSTALLER DECISION: Manufacturer=LENOVO | ' +
+            'Installed=True | ' +
+            "InstalledVersion=$InstalledVersion | " +
+            "AvailableVersion=$($LatestInformation.Version) | " +
+            'DownloadRequired=True | Reason=OutdatedOrIncomplete'
+        )
+    }
+    else {
+
+        Write-Log -Message (
+            'OEM INSTALLER DECISION: Manufacturer=LENOVO | ' +
+            'Installed=False | InstalledVersion= | ' +
+            "AvailableVersion=$($LatestInformation.Version) | " +
+            'DownloadRequired=True | Reason=Missing'
+        )
+    }
+
 
     $InstallerInformation =
         Get-LenovoSystemUpdateInstaller
@@ -2972,6 +3139,11 @@ function Install-LenovoSystemUpdate {
 
         Write-Log -Message (
             'Installed Lenovo System Update version is current or newer.'
+        )
+
+
+        Write-Log -Message (
+            'Lenovo System Update installer execution skipped.'
         )
 
 
