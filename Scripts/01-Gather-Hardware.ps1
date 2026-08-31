@@ -98,6 +98,17 @@ function Get-ItinoBooleanOption {
 
 
 # ============================================================
+# PHASE 10.20 - ORIGINAL PNP ERROR BASELINE
+# ============================================================
+#
+# The original DeviceErrors-Before.json is now treated like the
+# original driver snapshot. When the same deployment session
+# resumes after exit 3010, Cycle 2 must not replace the original
+# error baseline with the current post-restart device state.
+# ============================================================
+
+
+# ============================================================
 # OPTIONS FROM MAIN CONTROLLER
 # ============================================================
 
@@ -149,6 +160,12 @@ $DeviceErrorsBeforeFile =
     Join-Path `
         $BasePath `
         'DeviceErrors-Before.json'
+
+
+$DeviceErrorsSessionFile =
+    Join-Path `
+        $BasePath `
+        'DeviceErrors-Before.SessionId.txt'
 
 
 
@@ -644,6 +661,114 @@ try {
         @(
             $DeviceErrors
         ).Count
+
+
+    # ========================================================
+    # PHASE 10.20 - ORIGINAL DEVICE ERROR BASELINE
+    # ========================================================
+
+    $StoredDeviceErrorsSessionId =
+        $null
+
+
+    if (
+        Test-Path `
+            -LiteralPath $DeviceErrorsSessionFile `
+            -PathType Leaf
+    ) {
+
+        try {
+
+            $StoredDeviceErrorsSessionId =
+                (
+                    Get-Content `
+                        -LiteralPath $DeviceErrorsSessionFile `
+                        -Raw `
+                        -ErrorAction Stop
+                ).Trim()
+        }
+        catch {
+
+            $StoredDeviceErrorsSessionId =
+                $null
+        }
+    }
+
+
+    $ReuseOriginalDeviceErrors =
+        (
+            $PreserveInitialDriverBaseline -and
+            ([int]$DeploymentCycle -gt 1) -and
+            -not [string]::IsNullOrWhiteSpace(
+                [string]$DeploymentSessionId
+            ) -and
+            [string]$StoredDeviceErrorsSessionId -eq
+                [string]$DeploymentSessionId -and
+            (
+                Test-Path `
+                    -LiteralPath $DeviceErrorsBeforeFile `
+                    -PathType Leaf
+            )
+        )
+
+
+    if ($ReuseOriginalDeviceErrors) {
+
+        try {
+
+            $OriginalDeviceErrorsRaw =
+                Get-Content `
+                    -LiteralPath $DeviceErrorsBeforeFile `
+                    -Raw `
+                    -ErrorAction Stop
+
+
+            if (
+                [string]::IsNullOrWhiteSpace(
+                    $OriginalDeviceErrorsRaw
+                )
+            ) {
+
+                $OriginalDeviceErrors =
+                    @()
+            }
+            else {
+
+                $OriginalDeviceErrors =
+                    @(
+                        $OriginalDeviceErrorsRaw |
+                        ConvertFrom-Json `
+                            -ErrorAction Stop
+                    )
+            }
+
+
+            Write-Log -Message (
+                'Reusing ORIGINAL before-update device error baseline ' +
+                "from deployment cycle 1: '$DeviceErrorsBeforeFile'."
+            )
+
+
+            Write-Log -Message (
+                'Original device error baseline contains ' +
+                "$(@($OriginalDeviceErrors).Count) error record(s)."
+            )
+        }
+        catch {
+
+            Write-Log `
+                -Message (
+                    'Original device error baseline could not be read. ' +
+                    'The current cycle device state will become the new ' +
+                    "baseline. Reason: $($_.Exception.Message)"
+                ) `
+                -Level 'WARNING'
+
+
+            $ReuseOriginalDeviceErrors =
+                $false
+        }
+    }
 
 
     # ========================================================
@@ -1368,6 +1493,9 @@ try {
             DeploymentCycle =
                 $DeploymentCycle
 
+            OriginalDeviceErrorBaselineReused =
+                $ReuseOriginalDeviceErrors
+
             OriginalDriverBaselineReused =
                 $ReuseOriginalSnapshot
 
@@ -1520,23 +1648,49 @@ try {
     # SAVE DEVICE ERRORS
     # ========================================================
 
-    if (
-        $DeviceErrorCount -gt 0
-    ) {
+    if ($ReuseOriginalDeviceErrors) {
 
-        $DeviceErrors |
+        Write-Log -Message (
+            'Original before-update device error baseline is being ' +
+            'preserved for this resumed deployment cycle.'
+        )
+    }
+    else {
+
+        if (
+            $DeviceErrorCount -gt 0
+        ) {
+
             ConvertTo-Json `
+                -InputObject @($DeviceErrors) `
                 -Depth 6 |
             Set-Content `
                 -LiteralPath $DeviceErrorsBeforeFile `
                 -Encoding UTF8
-    }
-    else {
+        }
+        else {
 
-        '[]' |
-            Set-Content `
-                -LiteralPath $DeviceErrorsBeforeFile `
-                -Encoding UTF8
+            '[]' |
+                Set-Content `
+                    -LiteralPath $DeviceErrorsBeforeFile `
+                    -Encoding UTF8
+        }
+
+
+        Set-Content `
+            -LiteralPath $DeviceErrorsSessionFile `
+            -Value $DeploymentSessionId `
+            -Encoding UTF8
+
+
+        Write-Log -Message (
+            "Original device error baseline saved to '$DeviceErrorsBeforeFile'."
+        )
+
+
+        Write-Log -Message (
+            "Original device error baseline bound to deployment session '$DeploymentSessionId'."
+        )
     }
 
 

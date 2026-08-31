@@ -201,7 +201,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.5.9'
+    '1.5.10'
 
 $ScriptUpdated =
     '2026-08-31'
@@ -226,6 +226,11 @@ $ErrorActionPreference =
 # PHASE 10.19
 # Project/release metadata is embedded into HP, Dell, Lenovo and
 # common OEM update result JSON files.
+#
+# PHASE 10.20
+# Windows Update telemetry counts each update occurrence rather
+# than deduplicating by title, and Windows Update status now
+# reflects whether any update was actually installed.
 #
 # Reused only during the current script run. If Lenovo's normal
 # catalog is broken, the cleaned local recovery repository is
@@ -300,7 +305,7 @@ function Get-ItinoProjectMetadata {
     }
 
     if ([string]::IsNullOrWhiteSpace($ProjectPhase)) {
-        $ProjectPhase = '10.19'
+        $ProjectPhase = '10.20'
     }
 
     if ([string]::IsNullOrWhiteSpace($ReleaseChannel)) {
@@ -2607,10 +2612,6 @@ function Invoke-WindowsUpdateDriverUpdate {
                         }
 
 
-                    $WindowsUpdateStatus =
-                        'SuccessNoEligibleUpdates'
-
-
                     Write-Log -Message (
                         "$PhaseName processing complete. " +
                         "Total installed: $TotalInstalled."
@@ -2657,17 +2658,9 @@ function Invoke-WindowsUpdateDriverUpdate {
                     )
 
 
-                    if (
-                        -not (
-                            @($FoundItems) -contains
-                            [string]$Update.Title
-                        )
-                    ) {
-
-                        [void]$FoundItems.Add(
-                            [string]$Update.Title
-                        )
-                    }
+                    [void]$FoundItems.Add(
+                        [string]$Update.Title
+                    )
 
 
                     if (
@@ -2677,17 +2670,9 @@ function Invoke-WindowsUpdateDriverUpdate {
                         )
                     ) {
 
-                        if (
-                            -not (
-                                @($BlockedItems) -contains
-                                [string]$Update.Title
-                            )
-                        ) {
-
-                            [void]$BlockedItems.Add(
-                                [string]$Update.Title
-                            )
-                        }
+                        [void]$BlockedItems.Add(
+                            [string]$Update.Title
+                        )
 
 
                         Write-Log `
@@ -2702,17 +2687,9 @@ function Invoke-WindowsUpdateDriverUpdate {
                     }
 
 
-                    if (
-                        -not (
-                            @($EligibleItems) -contains
-                            [string]$Update.Title
-                        )
-                    ) {
-
-                        [void]$EligibleItems.Add(
-                            [string]$Update.Title
-                        )
-                    }
+                    [void]$EligibleItems.Add(
+                        [string]$Update.Title
+                    )
 
 
                     if (-not $Update.EulaAccepted) {
@@ -2744,17 +2721,9 @@ function Invoke-WindowsUpdateDriverUpdate {
                         )
 
 
-                        if (
-                            -not (
-                                @($DownloadedItems) -contains
-                                [string]$Update.Title
-                            )
-                        ) {
-
-                            [void]$DownloadedItems.Add(
-                                [string]$Update.Title
-                            )
-                        }
+                        [void]$DownloadedItems.Add(
+                            [string]$Update.Title
+                        )
 
 
                         [void]$UpdatesToInstall.Add(
@@ -2783,6 +2752,22 @@ function Invoke-WindowsUpdateDriverUpdate {
                         "$PhaseName pass ${Pass}: No eligible driver updates remain " +
                         'after firmware safety filtering.'
                     )
+
+
+                    $WindowsUpdateStatus =
+                        if (
+                            $InstalledItems.Count -gt 0
+                        ) {
+                            'Success'
+                        }
+                        elseif (
+                            $BlockedItems.Count -gt 0
+                        ) {
+                            'SuccessNoEligibleUpdates'
+                        }
+                        else {
+                            'SuccessNoUpdates'
+                        }
 
 
                     Write-Log -Message (
@@ -2922,17 +2907,9 @@ function Invoke-WindowsUpdateDriverUpdate {
                             )
 
 
-                            if (
-                                -not (
-                                    @($DownloadedItems) -contains
-                                    [string]$Update.Title
-                                )
-                            ) {
-
-                                [void]$DownloadedItems.Add(
-                                    [string]$Update.Title
-                                )
-                            }
+                            [void]$DownloadedItems.Add(
+                                [string]$Update.Title
+                            )
 
 
                             [void]$UpdatesToInstall.Add(
@@ -3145,31 +3122,15 @@ function Invoke-WindowsUpdateDriverUpdate {
                         $InstalledThisPass++
 
 
-                        if (
-                            -not (
-                                @($InstalledItems) -contains
-                                [string]$Update.Title
-                            )
-                        ) {
-
-                            [void]$InstalledItems.Add(
-                                [string]$Update.Title
-                            )
-                        }
+                        [void]$InstalledItems.Add(
+                            [string]$Update.Title
+                        )
                     }
                     else {
 
-                        if (
-                            -not (
-                                @($FailedItems) -contains
-                                [string]$Update.Title
-                            )
-                        ) {
-
-                            [void]$FailedItems.Add(
-                                [string]$Update.Title
-                            )
-                        }
+                        [void]$FailedItems.Add(
+                            [string]$Update.Title
+                        )
                     }
                 }
 
@@ -3436,7 +3397,10 @@ function Invoke-WindowsUpdateDriverUpdate {
             [PSCustomObject]@{
 
                 SchemaVersion =
-                    1
+                    2
+
+                CountMode =
+                    'Occurrences'
 
                 PhaseName =
                     $PhaseName

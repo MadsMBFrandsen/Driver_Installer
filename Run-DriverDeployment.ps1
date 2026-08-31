@@ -144,14 +144,14 @@ $ScriptName =
 # ------------------------------------------------------------
 
 $ScriptVersion =
-    '1.1.16'
+    '1.1.17'
 
 $ScriptUpdated =
     '2026-08-31'
 
 
 # ============================================================
-# PHASE 10.19 - PROJECT VERSION / RELEASE METADATA
+# PHASE 10.20 - REPORTING CORRECTNESS RELEASE CANDIDATE
 # ============================================================
 
 $DriverDeploymentName =
@@ -161,7 +161,7 @@ $DriverDeploymentVersion =
     '1.0.0-rc1'
 
 $DriverDeploymentPhase =
-    '10.19'
+    '10.20'
 
 $DriverDeploymentReleaseChannel =
     'ReleaseCandidate'
@@ -4011,6 +4011,19 @@ try {
         )
 
 
+    $WindowsUpdateInstalledThisCycle =
+        if (
+            $OEMUpdateSummary -and
+            $OEMUpdateSummary.WindowsUpdate -and
+            $OEMUpdateSummary.WindowsUpdate.Total
+        ) {
+            [int]$OEMUpdateSummary.WindowsUpdate.Total.Installed
+        }
+        else {
+            0
+        }
+
+
     $FinalOutcome =
         if ($DeploymentFailed) {
             'Failed'
@@ -4026,6 +4039,11 @@ try {
         }
         elseif ($FinalRestartRequired) {
             'SuccessRestartRequired'
+        }
+        elseif (
+            $WindowsUpdateInstalledThisCycle -gt 0
+        ) {
+            'Success'
         }
         elseif (
             $FinalVerificationStatus -eq 'SuccessNoUpdates' -or
@@ -4061,6 +4079,9 @@ try {
 
             OEMStatus =
                 $FinalOEMStatus
+
+            WindowsUpdateInstalledThisCycle =
+                $WindowsUpdateInstalledThisCycle
 
             RestartRequired =
                 $FinalRestartRequired
@@ -4526,6 +4547,15 @@ Write-Host 'Final Result'
         "Phase=$DriverDeploymentPhase | " +
         "Channel=$DriverDeploymentReleaseChannel | " +
         "Controller=$ScriptVersion"
+    )
+
+
+    Write-Log -Message (
+        'FINAL OUTCOME INPUT: ' +
+        "Verification=$FinalVerificationStatus | " +
+        "OEM=$FinalOEMStatus | " +
+        "WUInstalledThisCycle=$WindowsUpdateInstalledThisCycle | " +
+        "RestartRequired=$FinalRestartRequired"
     )
 
 
