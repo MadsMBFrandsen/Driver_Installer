@@ -61,6 +61,16 @@ $ScriptName =
 # ============================================================
 # VERSION HISTORY
 # ============================================================
+
+# ------------------------------------------------------------
+# Title   : Cleanup Policy Simplification
+# Version : 1.1.14
+# Reason  : Removes the duplicate DriverRollback cleanup switch.
+#           CleanupAfterDeployment is now the only setting that
+#           controls final successful ITINO root deletion.
+# Date    : 2026-08-31
+# ------------------------------------------------------------
+
 # ------------------------------------------------------------
 # Title   : Session-Aware Console Transcript
 # Version : 1.1.11
@@ -134,10 +144,10 @@ $ScriptName =
 # ------------------------------------------------------------
 
 $ScriptVersion =
-    '1.1.13'
+    '1.1.14'
 
 $ScriptUpdated =
-    '2026-08-27'
+    '2026-08-31'
 
 
 $ErrorActionPreference =
@@ -228,6 +238,9 @@ $KeepErrorLogOnFailure =
 #
 # This is the only switch controlling complete ITINO-root
 # deletion after a successful deployment.
+#
+# DriverRollback is part of C:\ProgramData\Itino and follows
+# this same switch. There is no separate rollback cleanup option.
 
 $CleanupAfterDeployment =
     $false
@@ -240,7 +253,7 @@ $CleanupAfterDeployment =
 #   D:\Driver_Installer
 #
 # Logs are copied to:
-#   D:\Driver_Installer\Logs\<Computer>\<SessionId>\
+#   D:\Driver_Installer\Logs\<Manufacturer>\<Computer>\<SessionId>\
 #
 # This happens before final ProgramData cleanup, so the logs
 # survive even when CleanupAfterDeployment = $true.
@@ -252,22 +265,6 @@ $CopyLogsToScriptLocation =
 $CopiedLogsFolderName =
     'Logs'
 
-
-
-# Also remove the persistent rollback folder after a FINAL
-# deployment result (exit 0 or exit 1).
-#
-# This deletes:
-#   C:\ProgramData\Itino\DriverRollback\
-#
-# It is intentionally skipped when the controller returns 3010,
-# because the deployment state must survive the restart.
-#
-# $false = keep rollback archives
-# $true  = delete the entire DriverRollback folder
-
-$DeleteDriverRollbackAfterDeployment =
-    $true
 
 
 # Run without requiring user interaction.
@@ -428,14 +425,6 @@ $env:ITINO_WRITE_LOG_FILES =
     }
 
 
-
-$env:ITINO_DELETE_DRIVER_ROLLBACK =
-    if ($DeleteDriverRollbackAfterDeployment) {
-        '1'
-    }
-    else {
-        '0'
-    }
 
 
 $env:ITINO_UNATTENDED_MODE =
@@ -2428,60 +2417,6 @@ function Update-DriverRollbackManifestMetadata {
 }
 
 
-function Remove-DriverRollbackData {
-
-    if (-not $DeleteDriverRollbackAfterDeployment) {
-
-        Write-Log -Message (
-            'Driver rollback cleanup is disabled.'
-        )
-
-        return
-    }
-
-
-    if (-not (
-        Test-Path -LiteralPath $DriverRollbackRoot
-    )) {
-
-        Write-Log -Message (
-            "Driver rollback folder does not exist: $DriverRollbackRoot"
-        )
-
-        return
-    }
-
-
-    Write-Log -Message (
-        "Removing driver rollback folder: $DriverRollbackRoot"
-    )
-
-
-    try {
-
-        Remove-Item `
-            -LiteralPath $DriverRollbackRoot `
-            -Recurse `
-            -Force `
-            -ErrorAction Stop
-
-
-        Write-Host (
-            "Removed driver rollback folder: $DriverRollbackRoot"
-        )
-    }
-    catch {
-
-        Write-Log `
-            -Message (
-                'Unable to completely remove the driver rollback folder. ' +
-                "Reason: $($_.Exception.Message)"
-            ) `
-            -Level 'WARNING'
-    }
-}
-
-
 function Invoke-FinalCleanup {
 
     if (
@@ -2531,9 +2466,14 @@ function Invoke-FinalCleanup {
     }
 
 
-    # Phase 8.1 rollback data lives outside $BasePath, so clean
-    # it separately when requested.
-    Remove-DriverRollbackData
+    # DriverRollback is intentionally not deleted separately here.
+    #
+    # On final clean success, Remove-EntireItinoRoot removes the
+    # complete C:\ProgramData\Itino tree, including DriverRollback,
+    # when CleanupAfterDeployment = $true.
+    #
+    # During failure cleanup, rollback data remains available for
+    # recovery and diagnostics.
 
 }
 
@@ -3300,15 +3240,10 @@ try {
     )
 
     Write-Log -Message (
-        'Final clean-success ITINO root deletion follows ' +
+        'Final clean-success ITINO root deletion, including rollback data, follows ' +
         "CleanupAfterDeployment: $CleanupAfterDeployment"
     )
 
-
-
-    Write-Log -Message (
-        "Delete DriverRollback folder after final deployment: $DeleteDriverRollbackAfterDeployment"
-    )
 
 
     Write-Log -Message (
