@@ -201,7 +201,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.5.7'
+    '1.5.8'
 
 $ScriptUpdated =
     '2026-08-31'
@@ -216,6 +216,12 @@ $ErrorActionPreference =
 # Windows Update reporting now records per-phase Found, Downloaded,
 # Installed, Failed, Blocked and Passes telemetry and exposes it
 # through OEMUpdateResult.json and the controller summary.
+#
+# PHASE 10.18
+# Dell DCU output is isolated by deployment cycle. Scan reports,
+# scan/apply logs and DellUpdateResult.json from Cycle 1 can no
+# longer be confused with Cycle 2. A latest DellUpdateResult.json
+# is still maintained at the Dell root for compatibility.
 #
 # Reused only during the current script run. If Lenovo's normal
 # catalog is broken, the cleaned local recovery repository is
@@ -4266,6 +4272,12 @@ function Write-DellUpdateResult {
         [string]$DellWorkingPath,
 
         [Parameter(Mandatory)]
+        [string]$DellRootPath,
+
+        [Parameter(Mandatory)]
+        [int]$DeploymentCycle,
+
+        [Parameter(Mandatory)]
         [string]$DCUPath,
 
         [Parameter(Mandatory)]
@@ -4305,9 +4317,15 @@ function Write-DellUpdateResult {
 
     try {
 
-        $ResultPath =
+        $CycleResultPath =
             Join-Path `
                 $DellWorkingPath `
+                'DellUpdateResult.json'
+
+
+        $LatestResultPath =
+            Join-Path `
+                $DellRootPath `
                 'DellUpdateResult.json'
 
 
@@ -4398,10 +4416,16 @@ function Write-DellUpdateResult {
             [PSCustomObject]@{
 
                 SchemaVersion =
-                    2
+                    3
 
                 GeneratedTime =
                     Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+                DeploymentCycle =
+                    $DeploymentCycle
+
+                CycleWorkingPath =
+                    $DellWorkingPath
 
                 Tool =
                     'Dell Command Update'
@@ -4475,21 +4499,37 @@ function Write-DellUpdateResult {
             }
 
 
-        $Result |
+        $ResultJson =
+            $Result |
             ConvertTo-Json `
-                -Depth 12 |
+                -Depth 12
+
+
+        $ResultJson |
             Set-Content `
-                -LiteralPath $ResultPath `
+                -LiteralPath $CycleResultPath `
+                -Encoding UTF8
+
+
+        $ResultJson |
+            Set-Content `
+                -LiteralPath $LatestResultPath `
                 -Encoding UTF8
 
 
         Write-Log -Message (
-            "Dell update result saved to '$ResultPath'."
+            "Dell cycle update result saved to '$CycleResultPath'."
+        )
+
+
+        Write-Log -Message (
+            "Dell latest update result saved to '$LatestResultPath'."
         )
 
 
         Write-Log -Message (
             'DELL UPDATE RESULT: ' +
+            "Cycle=$DeploymentCycle | " +
             "Status=$Status | " +
             "Applicable=$ApplicableUpdates | " +
             "Applied=$AppliedUpdates | " +
@@ -4542,22 +4582,101 @@ function Invoke-DellDriverUpdate {
     )
 
 
-    $DellWorkingPath =
+    $DellRootPath =
         Join-Path `
             $WorkingPath `
             'Dell'
 
 
-    if (-not (
-        Test-Path -LiteralPath $DellWorkingPath
-    )) {
+    $DeploymentCycle =
+        0
 
-        New-Item `
-            -Path $DellWorkingPath `
-            -ItemType Directory `
-            -Force |
-            Out-Null
+
+    $CycleFolderName =
+        $null
+
+
+    if (
+        [int]::TryParse(
+            [string]$env:ITINO_DEPLOYMENT_CYCLE,
+            [ref]$DeploymentCycle
+        ) -and
+        $DeploymentCycle -gt 0
+    ) {
+
+        $CycleFolderName =
+            "Cycle$DeploymentCycle"
     }
+    else {
+
+        $DeploymentCycle =
+            0
+
+
+        $CycleFolderName =
+            (
+                'Standalone-' +
+                (Get-Date -Format 'yyyyMMdd-HHmmss')
+            )
+    }
+
+
+    $DellWorkingPath =
+        Join-Path `
+            $DellRootPath `
+            $CycleFolderName
+
+
+    if (
+        Test-Path `
+            -LiteralPath $DellWorkingPath `
+            -PathType Container
+    ) {
+
+        Write-Log -Message (
+            'Removing existing Dell cycle working folder before ' +
+            "starting a fresh run: $DellWorkingPath"
+        )
+
+
+        Remove-Item `
+            -LiteralPath $DellWorkingPath `
+            -Recurse `
+            -Force `
+            -ErrorAction Stop
+    }
+
+
+    foreach (
+        $Directory in @(
+            $DellRootPath,
+            $DellWorkingPath
+        )
+    ) {
+
+        if (-not (
+            Test-Path `
+                -LiteralPath $Directory `
+                -PathType Container
+        )) {
+
+            New-Item `
+                -Path $Directory `
+                -ItemType Directory `
+                -Force |
+                Out-Null
+        }
+    }
+
+
+    Write-Log -Message (
+        "Dell deployment cycle: $DeploymentCycle"
+    )
+
+
+    Write-Log -Message (
+        "Dell cycle working folder: $DellWorkingPath"
+    )
 
 
     $ScanLog =
@@ -4693,8 +4812,18 @@ function Invoke-DellDriverUpdate {
         )
 
 
+        Write-Log -Message (
+            'DELL VALIDATION SUMMARY: ' +
+            "Cycle=$DeploymentCycle | Applicable=0 | Applied=0 | " +
+            "ScanExit=$($ScanInfo.ExitCode) | ApplySkipped=True | " +
+            'RestartRequired=False'
+        )
+
+
         Write-DellUpdateResult `
             -DellWorkingPath $DellWorkingPath `
+            -DellRootPath $DellRootPath `
+            -DeploymentCycle $DeploymentCycle `
             -DCUPath $DCU `
             -Status 'SuccessNoUpdates' `
             -ApplicableUpdates 0 `
@@ -4734,6 +4863,8 @@ function Invoke-DellDriverUpdate {
 
         Write-DellUpdateResult `
             -DellWorkingPath $DellWorkingPath `
+            -DellRootPath $DellRootPath `
+            -DeploymentCycle $DeploymentCycle `
             -DCUPath $DCU `
             -Status 'SuccessRestartRequired' `
             -ApplicableUpdates $null `
@@ -4758,6 +4889,8 @@ function Invoke-DellDriverUpdate {
 
         Write-DellUpdateResult `
             -DellWorkingPath $DellWorkingPath `
+            -DellRootPath $DellRootPath `
+            -DeploymentCycle $DeploymentCycle `
             -DCUPath $DCU `
             -Status 'Failed' `
             -ApplicableUpdates $null `
@@ -4797,6 +4930,8 @@ function Invoke-DellDriverUpdate {
 
         Write-DellUpdateResult `
             -DellWorkingPath $DellWorkingPath `
+            -DellRootPath $DellRootPath `
+            -DeploymentCycle $DeploymentCycle `
             -DCUPath $DCU `
             -Status 'SuccessNoUpdates' `
             -ApplicableUpdates 0 `
@@ -4838,6 +4973,8 @@ function Invoke-DellDriverUpdate {
 
         Write-DellUpdateResult `
             -DellWorkingPath $DellWorkingPath `
+            -DellRootPath $DellRootPath `
+            -DeploymentCycle $DeploymentCycle `
             -DCUPath $DCU `
             -Status 'Failed' `
             -ApplicableUpdates $null `
@@ -4896,6 +5033,8 @@ function Invoke-DellDriverUpdate {
 
         Write-DellUpdateResult `
             -DellWorkingPath $DellWorkingPath `
+            -DellRootPath $DellRootPath `
+            -DeploymentCycle $DeploymentCycle `
             -DCUPath $DCU `
             -Status 'SuccessNoUpdates' `
             -ApplicableUpdates 0 `
@@ -4998,6 +5137,8 @@ function Invoke-DellDriverUpdate {
 
         Write-DellUpdateResult `
             -DellWorkingPath $DellWorkingPath `
+            -DellRootPath $DellRootPath `
+            -DeploymentCycle $DeploymentCycle `
             -DCUPath $DCU `
             -Status 'SuccessRestartRequired' `
             -ApplicableUpdates $ApplicableCount `
@@ -5022,6 +5163,8 @@ function Invoke-DellDriverUpdate {
 
         Write-DellUpdateResult `
             -DellWorkingPath $DellWorkingPath `
+            -DellRootPath $DellRootPath `
+            -DeploymentCycle $DeploymentCycle `
             -DCUPath $DCU `
             -Status 'Failed' `
             -ApplicableUpdates $ApplicableCount `
@@ -5046,6 +5189,8 @@ function Invoke-DellDriverUpdate {
 
     Write-DellUpdateResult `
         -DellWorkingPath $DellWorkingPath `
+        -DellRootPath $DellRootPath `
+        -DeploymentCycle $DeploymentCycle `
         -DCUPath $DCU `
         -Status 'Success' `
         -ApplicableUpdates $ApplicableCount `
@@ -5058,6 +5203,17 @@ function Invoke-DellDriverUpdate {
         -ScanLogPath $ScanLog `
         -ApplyLogPath $ApplyLog `
         -Notes 'Dell Command Update apply completed successfully.'
+
+
+    Write-Log -Message (
+        'DELL VALIDATION SUMMARY: ' +
+        "Cycle=$DeploymentCycle | " +
+        "Applicable=$ApplicableCount | " +
+        "Applied=$ApplicableCount | " +
+        "ScanExit=$($ScanResult.ExitInfo.ExitCode) | " +
+        "ApplyExit=$($ApplyResult.ExitInfo.ExitCode) | " +
+        "RestartRequired=False"
+    )
 
 
     Write-Log -Message (
