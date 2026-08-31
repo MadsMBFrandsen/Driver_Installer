@@ -201,10 +201,10 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.5.5'
+    '1.5.7'
 
 $ScriptUpdated =
-    '2026-08-27'
+    '2026-08-31'
 
 
 
@@ -212,6 +212,11 @@ $ErrorActionPreference =
     'Stop'
 
 
+# PHASE 10.17
+# Windows Update reporting now records per-phase Found, Downloaded,
+# Installed, Failed, Blocked and Passes telemetry and exposes it
+# through OEMUpdateResult.json and the controller summary.
+#
 # Reused only during the current script run. If Lenovo's normal
 # catalog is broken, the cleaned local recovery repository is
 # created once and reused by later LSUClient rounds.
@@ -242,6 +247,184 @@ $script:OEMFallbackTelemetry =
         SystemUpdateFallbackUsed = $false
         Reason = $null
     }
+
+
+# Phase 10.17 Windows Update reporting telemetry.
+$script:WindowsUpdateInitialTelemetry =
+    $null
+
+$script:WindowsUpdateFinalTelemetry =
+    $null
+
+$script:WindowsUpdateFallbackRunTelemetry =
+    $null
+
+
+function Set-WindowsUpdateRunTelemetry {
+
+    param(
+        [Parameter(Mandatory)]
+        [object]$Telemetry
+    )
+
+
+    $PhaseName =
+        [string]$Telemetry.PhaseName
+
+
+    if (
+        $PhaseName -match
+        '(?i)initial Windows Update$'
+    ) {
+
+        $script:WindowsUpdateInitialTelemetry =
+            $Telemetry
+    }
+    elseif (
+        $PhaseName -match
+        '(?i)final Windows Update$'
+    ) {
+
+        $script:WindowsUpdateFinalTelemetry =
+            $Telemetry
+    }
+    else {
+
+        $script:WindowsUpdateFallbackRunTelemetry =
+            $Telemetry
+    }
+
+
+    Write-Log -Message (
+        'WINDOWS UPDATE RESULT: ' +
+        "Phase=$($Telemetry.PhaseName) | " +
+        "Status=$($Telemetry.Status) | " +
+        "Passes=$($Telemetry.PassesExecuted) | " +
+        "Found=$($Telemetry.Found) | " +
+        "Eligible=$($Telemetry.Eligible) | " +
+        "Downloaded=$($Telemetry.Downloaded) | " +
+        "Installed=$($Telemetry.Installed) | " +
+        "Failed=$($Telemetry.Failed) | " +
+        "Blocked=$($Telemetry.Blocked) | " +
+        "Remaining=$($Telemetry.Remaining) | " +
+        "RestartRequired=$($Telemetry.RestartRequired)"
+    )
+}
+
+
+function New-WindowsUpdateSummaryObject {
+
+    $Runs =
+        @(
+            $script:WindowsUpdateInitialTelemetry,
+            $script:WindowsUpdateFinalTelemetry,
+            $script:WindowsUpdateFallbackRunTelemetry
+        ) |
+        Where-Object {
+            $null -ne $_
+        }
+
+
+    $TotalPasses =
+        0
+
+    $TotalFound =
+        0
+
+    $TotalEligible =
+        0
+
+    $TotalDownloaded =
+        0
+
+    $TotalInstalled =
+        0
+
+    $TotalFailed =
+        0
+
+    $TotalBlocked =
+        0
+
+    $RestartRequired =
+        $false
+
+
+    foreach (
+        $Run in $Runs
+    ) {
+
+        $TotalPasses +=
+            [int]$Run.PassesExecuted
+
+        $TotalFound +=
+            [int]$Run.Found
+
+        $TotalEligible +=
+            [int]$Run.Eligible
+
+        $TotalDownloaded +=
+            [int]$Run.Downloaded
+
+        $TotalInstalled +=
+            [int]$Run.Installed
+
+        $TotalFailed +=
+            [int]$Run.Failed
+
+        $TotalBlocked +=
+            [int]$Run.Blocked
+
+        if ($Run.RestartRequired) {
+            $RestartRequired =
+                $true
+        }
+    }
+
+
+    return [PSCustomObject]@{
+
+        Initial =
+            $script:WindowsUpdateInitialTelemetry
+
+        Final =
+            $script:WindowsUpdateFinalTelemetry
+
+        Fallback =
+            $script:WindowsUpdateFallbackRunTelemetry
+
+        Total =
+            [PSCustomObject]@{
+
+                Runs =
+                    @($Runs).Count
+
+                Passes =
+                    $TotalPasses
+
+                Found =
+                    $TotalFound
+
+                Eligible =
+                    $TotalEligible
+
+                Downloaded =
+                    $TotalDownloaded
+
+                Installed =
+                    $TotalInstalled
+
+                Failed =
+                    $TotalFailed
+
+                Blocked =
+                    $TotalBlocked
+
+                RestartRequired =
+                    $RestartRequired
+            }
+    }
+}
 
 
 # ============================================================
@@ -2130,11 +2313,50 @@ function Invoke-WindowsUpdateDriverUpdate {
         0
 
 
+    $FoundItems =
+        New-Object System.Collections.ArrayList
+
+    $EligibleItems =
+        New-Object System.Collections.ArrayList
+
+    $DownloadedItems =
+        New-Object System.Collections.ArrayList
+
+    $InstalledItems =
+        New-Object System.Collections.ArrayList
+
+    $FailedItems =
+        New-Object System.Collections.ArrayList
+
+    $BlockedItems =
+        New-Object System.Collections.ArrayList
+
+
+    $PassesExecuted =
+        0
+
+    $RemainingDriverUpdates =
+        0
+
+    $WindowsUpdateRestartRequired =
+        $false
+
+    $WindowsUpdateStatus =
+        'Running'
+
+
+    try {
+
+
     for (
         $Pass = 1;
         $Pass -le $MaximumPasses;
         $Pass++
     ) {
+
+        $PassesExecuted =
+            $Pass
+
 
         Write-Log -Message (
             "$PhaseName pass $Pass of $MaximumPasses started."
@@ -2285,6 +2507,21 @@ function Invoke-WindowsUpdateDriverUpdate {
                     )
 
 
+                    $WindowsUpdateStatus =
+                        if (
+                            $InstalledItems.Count -gt 0
+                        ) {
+                            'Success'
+                        }
+                        else {
+                            'SuccessNoUpdates'
+                        }
+
+
+                    $WindowsUpdateStatus =
+                        'SuccessNoEligibleUpdates'
+
+
                     Write-Log -Message (
                         "$PhaseName processing complete. " +
                         "Total installed: $TotalInstalled."
@@ -2333,10 +2570,36 @@ function Invoke-WindowsUpdateDriverUpdate {
 
                     if (
                         -not (
+                            @($FoundItems) -contains
+                            [string]$Update.Title
+                        )
+                    ) {
+
+                        [void]$FoundItems.Add(
+                            [string]$Update.Title
+                        )
+                    }
+
+
+                    if (
+                        -not (
                             Test-ItinoWindowsUpdateAllowed `
                                 -Update $Update
                         )
                     ) {
+
+                        if (
+                            -not (
+                                @($BlockedItems) -contains
+                                [string]$Update.Title
+                            )
+                        ) {
+
+                            [void]$BlockedItems.Add(
+                                [string]$Update.Title
+                            )
+                        }
+
 
                         Write-Log `
                             -Message (
@@ -2347,6 +2610,19 @@ function Invoke-WindowsUpdateDriverUpdate {
                             -Level 'WARNING'
 
                         continue
+                    }
+
+
+                    if (
+                        -not (
+                            @($EligibleItems) -contains
+                            [string]$Update.Title
+                        )
+                    ) {
+
+                        [void]$EligibleItems.Add(
+                            [string]$Update.Title
+                        )
                     }
 
 
@@ -2377,6 +2653,19 @@ function Invoke-WindowsUpdateDriverUpdate {
                             "$PhaseName pass $Pass already downloaded: " +
                             "$($Update.Title)"
                         )
+
+
+                        if (
+                            -not (
+                                @($DownloadedItems) -contains
+                                [string]$Update.Title
+                            )
+                        ) {
+
+                            [void]$DownloadedItems.Add(
+                                [string]$Update.Title
+                            )
+                        }
 
 
                         [void]$UpdatesToInstall.Add(
@@ -2542,6 +2831,19 @@ function Invoke-WindowsUpdateDriverUpdate {
                                 "$PhaseName pass $Pass downloaded: " +
                                 "$($Update.Title)"
                             )
+
+
+                            if (
+                                -not (
+                                    @($DownloadedItems) -contains
+                                    [string]$Update.Title
+                                )
+                            ) {
+
+                                [void]$DownloadedItems.Add(
+                                    [string]$Update.Title
+                                )
+                            }
 
 
                             [void]$UpdatesToInstall.Add(
@@ -2752,6 +3054,33 @@ function Invoke-WindowsUpdateDriverUpdate {
                     ) {
 
                         $InstalledThisPass++
+
+
+                        if (
+                            -not (
+                                @($InstalledItems) -contains
+                                [string]$Update.Title
+                            )
+                        ) {
+
+                            [void]$InstalledItems.Add(
+                                [string]$Update.Title
+                            )
+                        }
+                    }
+                    else {
+
+                        if (
+                            -not (
+                                @($FailedItems) -contains
+                                [string]$Update.Title
+                            )
+                        ) {
+
+                            [void]$FailedItems.Add(
+                                [string]$Update.Title
+                            )
+                        }
                     }
                 }
 
@@ -2773,6 +3102,10 @@ function Invoke-WindowsUpdateDriverUpdate {
                 if (
                     $InstallResult.RebootRequired
                 ) {
+
+                    $WindowsUpdateRestartRequired =
+                        $true
+
 
                     Set-RestartRequired `
                         -Reason (
@@ -2950,6 +3283,17 @@ function Invoke-WindowsUpdateDriverUpdate {
         $RemainingDriverUpdates -eq 0
     ) {
 
+        $WindowsUpdateStatus =
+            if (
+                $InstalledItems.Count -gt 0
+            ) {
+                'Success'
+            }
+            else {
+                'SuccessNoUpdates'
+            }
+
+
         Write-Log -Message (
             "$PhaseName processing complete after final confirmation. " +
             "Total installed: $TotalInstalled."
@@ -2964,6 +3308,100 @@ function Invoke-WindowsUpdateDriverUpdate {
         "$PhaseName reached the maximum pass limit of $MaximumPasses " +
         "and $RemainingDriverUpdates driver update(s) are still pending."
     )
+
+
+    }
+    catch {
+
+        $WindowsUpdateStatus =
+            'Failed'
+
+
+        foreach (
+            $EligibleItem in @($EligibleItems)
+        ) {
+
+            if (
+                -not (
+                    @($InstalledItems) -contains
+                    [string]$EligibleItem
+                ) -and
+                -not (
+                    @($FailedItems) -contains
+                    [string]$EligibleItem
+                )
+            ) {
+
+                [void]$FailedItems.Add(
+                    [string]$EligibleItem
+                )
+            }
+        }
+
+
+        throw
+    }
+    finally {
+
+        $Telemetry =
+            [PSCustomObject]@{
+
+                SchemaVersion =
+                    1
+
+                PhaseName =
+                    $PhaseName
+
+                Status =
+                    $WindowsUpdateStatus
+
+                PassesExecuted =
+                    $PassesExecuted
+
+                Found =
+                    @($FoundItems).Count
+
+                Eligible =
+                    @($EligibleItems).Count
+
+                Downloaded =
+                    @($DownloadedItems).Count
+
+                Installed =
+                    @($InstalledItems).Count
+
+                Failed =
+                    @($FailedItems).Count
+
+                Blocked =
+                    @($BlockedItems).Count
+
+                Remaining =
+                    $RemainingDriverUpdates
+
+                RestartRequired =
+                    $WindowsUpdateRestartRequired
+
+                FoundItems =
+                    @($FoundItems)
+
+                DownloadedItems =
+                    @($DownloadedItems)
+
+                InstalledItems =
+                    @($InstalledItems)
+
+                FailedItems =
+                    @($FailedItems)
+
+                BlockedItems =
+                    @($BlockedItems)
+            }
+
+
+        Set-WindowsUpdateRunTelemetry `
+            -Telemetry $Telemetry
+    }
 }
 
 
@@ -3960,7 +4398,7 @@ function Write-DellUpdateResult {
             [PSCustomObject]@{
 
                 SchemaVersion =
-                    1
+                    2
 
                 GeneratedTime =
                     Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -9119,6 +9557,9 @@ function Write-OEMUpdateResult {
                 Verification =
                     $null
 
+                WindowsUpdate =
+                    New-WindowsUpdateSummaryObject
+
                 FallbackTelemetry =
                     $script:OEMFallbackTelemetry
 
@@ -9159,6 +9600,23 @@ function Write-OEMUpdateResult {
             "Status=$Status | " +
             "RestartRequired=$RestartRequired | " +
             "ExitCode=$ExitCode"
+        )
+
+
+        $WUSummary =
+            $Result.WindowsUpdate
+
+
+        Write-Log -Message (
+            'WINDOWS UPDATE TOTAL: ' +
+            "Runs=$($WUSummary.Total.Runs) | " +
+            "Passes=$($WUSummary.Total.Passes) | " +
+            "Found=$($WUSummary.Total.Found) | " +
+            "Downloaded=$($WUSummary.Total.Downloaded) | " +
+            "Installed=$($WUSummary.Total.Installed) | " +
+            "Failed=$($WUSummary.Total.Failed) | " +
+            "Blocked=$($WUSummary.Total.Blocked) | " +
+            "RestartRequired=$($WUSummary.Total.RestartRequired)"
         )
 
 

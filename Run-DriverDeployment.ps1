@@ -144,7 +144,7 @@ $ScriptName =
 # ------------------------------------------------------------
 
 $ScriptVersion =
-    '1.1.14'
+    '1.1.15'
 
 $ScriptUpdated =
     '2026-08-31'
@@ -3868,7 +3868,7 @@ try {
         [PSCustomObject]@{
 
             SchemaVersion =
-                1
+                2
 
             Outcome =
                 $FinalOutcome
@@ -3940,6 +3940,17 @@ try {
                         else {
                             $null
                         }
+                }
+
+            WindowsUpdate =
+                if (
+                    $OEMUpdateSummary -and
+                    $OEMUpdateSummary.WindowsUpdate
+                ) {
+                    $OEMUpdateSummary.WindowsUpdate
+                }
+                else {
+                    $null
                 }
 
             DeviceHealth =
@@ -4137,6 +4148,80 @@ try {
         Write-Host "Remaining        : $($VerificationSummary.RemainingDeviceErrors)"
     }
 
+    if (
+        $OEMUpdateSummary -and
+        $OEMUpdateSummary.WindowsUpdate
+    ) {
+
+        $WindowsUpdateSummary =
+            $OEMUpdateSummary.WindowsUpdate
+
+
+        Write-Host ''
+        Write-Host 'Windows Update'
+
+
+        if ($WindowsUpdateSummary.Initial) {
+
+            Write-Host (
+                'Initial          : ' +
+                "Status=$($WindowsUpdateSummary.Initial.Status), " +
+                "Passes=$($WindowsUpdateSummary.Initial.PassesExecuted), " +
+                "Found=$($WindowsUpdateSummary.Initial.Found), " +
+                "Downloaded=$($WindowsUpdateSummary.Initial.Downloaded), " +
+                "Installed=$($WindowsUpdateSummary.Initial.Installed), " +
+                "Failed=$($WindowsUpdateSummary.Initial.Failed), " +
+                "Blocked=$($WindowsUpdateSummary.Initial.Blocked)"
+            )
+        }
+
+
+        if ($WindowsUpdateSummary.Final) {
+
+            Write-Host (
+                'Final            : ' +
+                "Status=$($WindowsUpdateSummary.Final.Status), " +
+                "Passes=$($WindowsUpdateSummary.Final.PassesExecuted), " +
+                "Found=$($WindowsUpdateSummary.Final.Found), " +
+                "Downloaded=$($WindowsUpdateSummary.Final.Downloaded), " +
+                "Installed=$($WindowsUpdateSummary.Final.Installed), " +
+                "Failed=$($WindowsUpdateSummary.Final.Failed), " +
+                "Blocked=$($WindowsUpdateSummary.Final.Blocked)"
+            )
+        }
+
+
+        if ($WindowsUpdateSummary.Fallback) {
+
+            Write-Host (
+                'Fallback/Forced  : ' +
+                "Status=$($WindowsUpdateSummary.Fallback.Status), " +
+                "Passes=$($WindowsUpdateSummary.Fallback.PassesExecuted), " +
+                "Found=$($WindowsUpdateSummary.Fallback.Found), " +
+                "Downloaded=$($WindowsUpdateSummary.Fallback.Downloaded), " +
+                "Installed=$($WindowsUpdateSummary.Fallback.Installed), " +
+                "Failed=$($WindowsUpdateSummary.Fallback.Failed), " +
+                "Blocked=$($WindowsUpdateSummary.Fallback.Blocked)"
+            )
+        }
+
+
+        if ($WindowsUpdateSummary.Total) {
+
+            Write-Host (
+                'Total            : ' +
+                "Runs=$($WindowsUpdateSummary.Total.Runs), " +
+                "Passes=$($WindowsUpdateSummary.Total.Passes), " +
+                "Found=$($WindowsUpdateSummary.Total.Found), " +
+                "Downloaded=$($WindowsUpdateSummary.Total.Downloaded), " +
+                "Installed=$($WindowsUpdateSummary.Total.Installed), " +
+                "Failed=$($WindowsUpdateSummary.Total.Failed), " +
+                "Blocked=$($WindowsUpdateSummary.Total.Blocked)"
+            )
+        }
+    }
+
+
     if ($OEMUpdateSummary) {
 
         Write-Host ''
@@ -4238,6 +4323,24 @@ try {
         "OEMStatus=$($FinalSummary.OEMStatus) | " +
         "RestartRequired=$($FinalSummary.RestartRequired)"
     )
+
+
+    if (
+        $FinalSummary.WindowsUpdate -and
+        $FinalSummary.WindowsUpdate.Total
+    ) {
+
+        Write-Log -Message (
+            'FINAL WINDOWS UPDATE SUMMARY: ' +
+            "Runs=$($FinalSummary.WindowsUpdate.Total.Runs) | " +
+            "Passes=$($FinalSummary.WindowsUpdate.Total.Passes) | " +
+            "Found=$($FinalSummary.WindowsUpdate.Total.Found) | " +
+            "Downloaded=$($FinalSummary.WindowsUpdate.Total.Downloaded) | " +
+            "Installed=$($FinalSummary.WindowsUpdate.Total.Installed) | " +
+            "Failed=$($FinalSummary.WindowsUpdate.Total.Failed) | " +
+            "Blocked=$($FinalSummary.WindowsUpdate.Total.Blocked)"
+        )
+    }
 
 
     if ($FinalSummary.OEM) {
