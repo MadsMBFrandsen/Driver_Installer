@@ -290,7 +290,7 @@ $KeepErrorLogOnFailure =
 # this same switch. There is no separate rollback cleanup option.
 
 $CleanupAfterDeployment =
-    $false
+    $true
 
 
 # Copy the AutoResume log and console transcript files to the
