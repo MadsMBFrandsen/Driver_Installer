@@ -201,7 +201,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.5.8'
+    '1.5.9'
 
 $ScriptUpdated =
     '2026-08-31'
@@ -222,6 +222,10 @@ $ErrorActionPreference =
 # scan/apply logs and DellUpdateResult.json from Cycle 1 can no
 # longer be confused with Cycle 2. A latest DellUpdateResult.json
 # is still maintained at the Dell root for compatibility.
+#
+# PHASE 10.19
+# Project/release metadata is embedded into HP, Dell, Lenovo and
+# common OEM update result JSON files.
 #
 # Reused only during the current script run. If Lenovo's normal
 # catalog is broken, the cleaned local recovery repository is
@@ -264,6 +268,85 @@ $script:WindowsUpdateFinalTelemetry =
 
 $script:WindowsUpdateFallbackRunTelemetry =
     $null
+
+
+function Get-ItinoProjectMetadata {
+
+    $ProjectName =
+        [string]$env:ITINO_DRIVER_DEPLOYMENT_NAME
+
+    $ProjectVersion =
+        [string]$env:ITINO_DRIVER_DEPLOYMENT_VERSION
+
+    $ProjectPhase =
+        [string]$env:ITINO_DRIVER_DEPLOYMENT_PHASE
+
+    $ReleaseChannel =
+        [string]$env:ITINO_DRIVER_DEPLOYMENT_RELEASE_CHANNEL
+
+    $BuildDate =
+        [string]$env:ITINO_DRIVER_DEPLOYMENT_BUILD_DATE
+
+    $ControllerVersion =
+        [string]$env:ITINO_CONTROLLER_VERSION
+
+
+    if ([string]::IsNullOrWhiteSpace($ProjectName)) {
+        $ProjectName = 'ITINO Driver Deployment'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ProjectVersion)) {
+        $ProjectVersion = '1.0.0-rc1'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ProjectPhase)) {
+        $ProjectPhase = '10.19'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ReleaseChannel)) {
+        $ReleaseChannel = 'ReleaseCandidate'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($BuildDate)) {
+        $BuildDate = '2026-08-31'
+    }
+
+
+    return [PSCustomObject]@{
+
+        Name = $ProjectName
+        Version = $ProjectVersion
+        Phase = $ProjectPhase
+        ReleaseChannel = $ReleaseChannel
+        BuildDate = $BuildDate
+
+        ControllerVersion =
+            if ([string]::IsNullOrWhiteSpace($ControllerVersion)) {
+                $null
+            }
+            else {
+                $ControllerVersion
+            }
+
+        UpdateDriversVersion = $ScriptVersion
+
+        GitTag =
+            if ([string]::IsNullOrWhiteSpace([string]$env:ITINO_GIT_TAG)) {
+                $null
+            }
+            else {
+                [string]$env:ITINO_GIT_TAG
+            }
+
+        GitCommit =
+            if ([string]::IsNullOrWhiteSpace([string]$env:ITINO_GIT_COMMIT)) {
+                $null
+            }
+            else {
+                [string]$env:ITINO_GIT_COMMIT
+            }
+    }
+}
 
 
 function Set-WindowsUpdateRunTelemetry {
@@ -4416,10 +4499,14 @@ function Write-DellUpdateResult {
             [PSCustomObject]@{
 
                 SchemaVersion =
-                    3
+                    4
 
                 GeneratedTime =
                     Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+
+                Project =
+                    Get-ItinoProjectMetadata
 
                 DeploymentCycle =
                     $DeploymentCycle
@@ -6308,10 +6395,14 @@ function Write-HPUpdateResult {
             [PSCustomObject]@{
 
                 SchemaVersion =
-                    1
+                    2
 
                 GeneratedTime =
                     Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+
+                Project =
+                    Get-ItinoProjectMetadata
 
                 Tool =
                     'HP Image Assistant'
@@ -9026,10 +9117,14 @@ function Write-LenovoUpdateResult {
             [PSCustomObject]@{
 
                 SchemaVersion =
-                    1
+                    2
 
                 GeneratedTime =
                     Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+
+                Project =
+                    Get-ItinoProjectMetadata
 
                 PrimaryEngine =
                     'LSUClient'
@@ -9672,10 +9767,14 @@ function Write-OEMUpdateResult {
             [PSCustomObject]@{
 
                 SchemaVersion =
-                    1
+                    3
 
                 GeneratedTime =
                     Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+
+                Project =
+                    Get-ItinoProjectMetadata
 
                 ComputerName =
                     $env:COMPUTERNAME
@@ -9750,6 +9849,7 @@ function Write-OEMUpdateResult {
 
         Write-Log -Message (
             'OEM UPDATE RESULT: ' +
+            "ProjectVersion=$((Get-ItinoProjectMetadata).Version) | " +
             "Manufacturer=$Manufacturer | " +
             "Tool=$ToolName | " +
             "Version=$ToolVersion | " +
@@ -9820,6 +9920,20 @@ try {
 
     Write-Log -Message (
         "Script version: $ScriptVersion"
+    )
+
+
+    $ProjectMetadata =
+        Get-ItinoProjectMetadata
+
+
+    Write-Log -Message (
+        'PROJECT RELEASE: ' +
+        "Version=$($ProjectMetadata.Version) | " +
+        "Phase=$($ProjectMetadata.Phase) | " +
+        "Channel=$($ProjectMetadata.ReleaseChannel) | " +
+        "Controller=$($ProjectMetadata.ControllerVersion) | " +
+        "UpdateDrivers=$ScriptVersion"
     )
 
 

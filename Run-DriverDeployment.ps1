@@ -144,10 +144,57 @@ $ScriptName =
 # ------------------------------------------------------------
 
 $ScriptVersion =
-    '1.1.15'
+    '1.1.16'
 
 $ScriptUpdated =
     '2026-08-31'
+
+
+# ============================================================
+# PHASE 10.19 - PROJECT VERSION / RELEASE METADATA
+# ============================================================
+
+$DriverDeploymentName =
+    'ITINO Driver Deployment'
+
+$DriverDeploymentVersion =
+    '1.0.0-rc1'
+
+$DriverDeploymentPhase =
+    '10.19'
+
+$DriverDeploymentReleaseChannel =
+    'ReleaseCandidate'
+
+$DriverDeploymentBuildDate =
+    '2026-08-31'
+
+
+# Optional GitHub/build-pipeline values.
+$DriverDeploymentGitTag =
+    [string]$env:ITINO_GIT_TAG
+
+$DriverDeploymentGitCommit =
+    [string]$env:ITINO_GIT_COMMIT
+
+
+$env:ITINO_DRIVER_DEPLOYMENT_NAME =
+    $DriverDeploymentName
+
+$env:ITINO_DRIVER_DEPLOYMENT_VERSION =
+    $DriverDeploymentVersion
+
+$env:ITINO_DRIVER_DEPLOYMENT_PHASE =
+    $DriverDeploymentPhase
+
+$env:ITINO_DRIVER_DEPLOYMENT_RELEASE_CHANNEL =
+    $DriverDeploymentReleaseChannel
+
+$env:ITINO_DRIVER_DEPLOYMENT_BUILD_DATE =
+    $DriverDeploymentBuildDate
+
+$env:ITINO_CONTROLLER_VERSION =
+    $ScriptVersion
 
 
 $ErrorActionPreference =
@@ -609,6 +656,12 @@ $SummaryFile =
     Join-Path `
         $BasePath `
         'DeploymentSummary.json'
+
+
+$DeploymentVersionFile =
+    Join-Path `
+        $BasePath `
+        'DeploymentVersion.json'
 
 
 $VerificationFile =
@@ -1753,11 +1806,111 @@ function Initialize-ItinoDeploymentSession {
     $env:ITINO_DEPLOYMENT_CYCLE =
         [string]$script:DeploymentSession.Cycle
 
+
+    Write-ItinoProjectMetadata
+
+
     Write-Log -Message (
         'Deployment session: ' +
         "$($script:DeploymentSession.SessionId); " +
         "Cycle=$($script:DeploymentSession.Cycle)/$MaximumDeploymentCycles"
     )
+}
+
+
+function Get-ItinoProjectMetadata {
+
+    return [PSCustomObject]@{
+
+        Name =
+            $DriverDeploymentName
+
+        Version =
+            $DriverDeploymentVersion
+
+        Phase =
+            $DriverDeploymentPhase
+
+        ReleaseChannel =
+            $DriverDeploymentReleaseChannel
+
+        BuildDate =
+            $DriverDeploymentBuildDate
+
+        ControllerVersion =
+            $ScriptVersion
+
+        ControllerUpdated =
+            $ScriptUpdated
+
+        GitTag =
+            if (
+                [string]::IsNullOrWhiteSpace(
+                    $DriverDeploymentGitTag
+                )
+            ) {
+                $null
+            }
+            else {
+                $DriverDeploymentGitTag
+            }
+
+        GitCommit =
+            if (
+                [string]::IsNullOrWhiteSpace(
+                    $DriverDeploymentGitCommit
+                )
+            ) {
+                $null
+            }
+            else {
+                $DriverDeploymentGitCommit
+            }
+    }
+}
+
+
+function Write-ItinoProjectMetadata {
+
+    try {
+
+        if (-not (
+            Test-Path `
+                -LiteralPath $BasePath `
+                -PathType Container
+        )) {
+
+            New-Item `
+                -Path $BasePath `
+                -ItemType Directory `
+                -Force `
+                -ErrorAction Stop |
+            Out-Null
+        }
+
+
+        Get-ItinoProjectMetadata |
+            ConvertTo-Json `
+                -Depth 6 |
+            Set-Content `
+                -LiteralPath $DeploymentVersionFile `
+                -Encoding UTF8 `
+                -ErrorAction Stop
+
+
+        Write-Log -Message (
+            "Deployment version metadata saved to '$DeploymentVersionFile'."
+        )
+    }
+    catch {
+
+        Write-Log `
+            -Message (
+                'Unable to save deployment version metadata. ' +
+                "Reason: $($_.Exception.Message)"
+            ) `
+            -Level 'WARNING'
+    }
 }
 
 
@@ -3192,6 +3345,33 @@ try {
 
 
     Write-Log -Message (
+        'PROJECT RELEASE: ' +
+        "Name=$DriverDeploymentName | " +
+        "Version=$DriverDeploymentVersion | " +
+        "Phase=$DriverDeploymentPhase | " +
+        "Channel=$DriverDeploymentReleaseChannel | " +
+        "BuildDate=$DriverDeploymentBuildDate"
+    )
+
+
+    if (
+        -not [string]::IsNullOrWhiteSpace(
+            $DriverDeploymentGitTag
+        ) -or
+        -not [string]::IsNullOrWhiteSpace(
+            $DriverDeploymentGitCommit
+        )
+    ) {
+
+        Write-Log -Message (
+            'PROJECT SOURCE: ' +
+            "GitTag=$DriverDeploymentGitTag | " +
+            "GitCommit=$DriverDeploymentGitCommit"
+        )
+    }
+
+
+    Write-Log -Message (
         "Controller directory: $ScriptRoot"
     )
 
@@ -3868,7 +4048,10 @@ try {
         [PSCustomObject]@{
 
             SchemaVersion =
-                2
+                3
+
+            Project =
+                Get-ItinoProjectMetadata
 
             Outcome =
                 $FinalOutcome
@@ -3990,6 +4173,8 @@ try {
 
     $Summary =
         [PSCustomObject]@{
+            SchemaVersion = 3
+            Project = Get-ItinoProjectMetadata
             ComputerName = $env:COMPUTERNAME
             SessionId =
                 if ($script:DeploymentSession) {
@@ -4061,7 +4246,26 @@ try {
     Write-Host 'Driver Deployment Summary'
     Write-Host '============================================================'
     Write-Host ''
-    Write-Host 'Final Result'
+    Write-Host 'Project'
+Write-Host (
+    'Version          : ' +
+    $DriverDeploymentVersion
+)
+Write-Host (
+    'Phase            : ' +
+    $DriverDeploymentPhase
+)
+Write-Host (
+    'Release Channel  : ' +
+    $DriverDeploymentReleaseChannel
+)
+Write-Host (
+    'Controller       : ' +
+    $ScriptVersion
+)
+Write-Host ''
+
+Write-Host 'Final Result'
     Write-Host "Outcome          : $($FinalSummary.Outcome)"
     Write-Host "Verification     : $($FinalSummary.VerificationStatus)"
     Write-Host "OEM Status       : $($FinalSummary.OEMStatus)"
@@ -4314,6 +4518,15 @@ try {
         $FinalExitCode =
             0
     }
+
+
+    Write-Log -Message (
+        'FINAL PROJECT VERSION: ' +
+        "Version=$DriverDeploymentVersion | " +
+        "Phase=$DriverDeploymentPhase | " +
+        "Channel=$DriverDeploymentReleaseChannel | " +
+        "Controller=$ScriptVersion"
+    )
 
 
     Write-Log -Message (
