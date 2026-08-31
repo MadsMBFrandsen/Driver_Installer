@@ -60,6 +60,16 @@ $ScriptName =
 # ============================================================
 
 # ------------------------------------------------------------
+# Title   : HP Cycle Isolation and Installed Telemetry
+# Version : 1.5.6
+# Reason  : Stores HPIA reports and downloads in a fresh folder
+#           for each deployment cycle so Cycle 2 cannot count
+#           Cycle 1 artifacts. Adds best-effort HPIA Installed
+#           telemetry and exposes it in OEMUpdateResult.json.
+# Date    : 2026-08-31
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
 # Title   : HPIA Detailed Reporting
 # Version : 1.4.3
 # Reason  : Saves explicit HPIA recommendation/result files,
@@ -4785,6 +4795,300 @@ function Get-HPIAOutputFiles {
 }
 
 
+
+function Get-HPIAInstalledTelemetry {
+
+    param(
+        [Parameter(Mandatory)]
+        [string]$ResultFile,
+
+        [Parameter(Mandatory)]
+        [object[]]$SoftPaqFiles,
+
+        [Parameter(Mandatory)]
+        [bool]$ExitCodeAvailable,
+
+        [AllowNull()]
+        [Nullable[int]]$ExitCode
+    )
+
+
+    $DownloadedSoftPaqs =
+        @(
+            $SoftPaqFiles |
+            ForEach-Object {
+
+                if (
+                    $_ -and
+                    -not [string]::IsNullOrWhiteSpace(
+                        [string]$_.BaseName
+                    )
+                ) {
+
+                    $_.BaseName.ToUpperInvariant()
+                }
+            } |
+            Select-Object -Unique
+        )
+
+
+    $InstalledSoftPaqs =
+        New-Object System.Collections.ArrayList
+
+
+    $DetectionSource =
+        'NoInstallEvidence'
+
+
+    $EstimateUsed =
+        $false
+
+
+    # --------------------------------------------------------
+    # First try to read the explicit HPIA install-result HTML.
+    # HPIA versions can format this file differently, so this is
+    # intentionally best-effort and limited to SoftPaq IDs that
+    # were downloaded in THIS deployment cycle.
+    # --------------------------------------------------------
+
+    if (
+        Test-Path `
+            -LiteralPath $ResultFile `
+            -PathType Leaf
+    ) {
+
+        try {
+
+            $ResultContent =
+                Get-Content `
+                    -LiteralPath $ResultFile `
+                    -Raw `
+                    -ErrorAction Stop
+
+
+            $PlainText =
+                [regex]::Replace(
+                    $ResultContent,
+                    '<[^>]+>',
+                    ' '
+                )
+
+
+            try {
+
+                $PlainText =
+                    [System.Net.WebUtility]::HtmlDecode(
+                        $PlainText
+                    )
+            }
+            catch {
+            }
+
+
+            $PlainText =
+                [regex]::Replace(
+                    $PlainText,
+                    '\s+',
+                    ' '
+                )
+
+
+            foreach (
+                $SoftPaq in $DownloadedSoftPaqs
+            ) {
+
+                $EscapedSoftPaq =
+                    [regex]::Escape(
+                        $SoftPaq
+                    )
+
+
+                $ContextMatches =
+                    @(
+                        [regex]::Matches(
+                            $PlainText,
+                            (
+                                '(?i).{0,250}\b' +
+                                $EscapedSoftPaq +
+                                '\b.{0,500}'
+                            )
+                        )
+                    )
+
+
+                foreach (
+                    $ContextMatch in $ContextMatches
+                ) {
+
+                    $Context =
+                        [string]$ContextMatch.Value
+
+
+                    $PositiveInstallEvidence =
+                        $Context -match (
+                            '(?i)' +
+                            '(successfully\s+installed|' +
+                            'installation\s+successful|' +
+                            'install(?:ation)?\s+status\s*[:=]?\s*success|' +
+                            '\binstalled\b)'
+                        )
+
+
+                    $NegativeInstallEvidence =
+                        $Context -match (
+                            '(?i)' +
+                            '(not\s+installed|' +
+                            'install(?:ation)?\s+failed|' +
+                            '\bfailed\b|' +
+                            '\bfailure\b|' +
+                            '\bskipped\b|' +
+                            'not\s+applicable|' +
+                            'not\s+selected|' +
+                            '\bcancelled\b|' +
+                            '\bcanceled\b)'
+                        )
+
+
+                    if (
+                        $PositiveInstallEvidence -and
+                        -not $NegativeInstallEvidence
+                    ) {
+
+                        if (
+                            -not (
+                                @(
+                                    $InstalledSoftPaqs
+                                ) -contains $SoftPaq
+                            )
+                        ) {
+
+                            [void]$InstalledSoftPaqs.Add(
+                                $SoftPaq
+                            )
+                        }
+
+
+                        $DetectionSource =
+                            'HPIAResultFile'
+
+
+                        break
+                    }
+                }
+            }
+        }
+        catch {
+
+            Write-Log `
+                -Message (
+                    'Unable to parse HPIA install-result telemetry. ' +
+                    "Reason: $($_.Exception.Message)"
+                ) `
+                -Level 'WARNING'
+        }
+    }
+
+
+    # --------------------------------------------------------
+    # Fallback:
+    #
+    # HPIA was launched with /Action:Install. When the current
+    # cycle downloaded one or more SoftPaqs and HPIA returned a
+    # successful install exit code, use the current-cycle
+    # downloads as the installed count if the result HTML did
+    # not expose a parseable per-package status.
+    #
+    # Because Phase 10.14 gives every cycle a fresh Downloads
+    # directory, old Cycle 1 packages cannot inflate this count.
+    # --------------------------------------------------------
+
+    if (
+        $InstalledSoftPaqs.Count -eq 0 -and
+        $DownloadedSoftPaqs.Count -gt 0 -and
+        $ExitCodeAvailable -and
+        $ExitCode -in @(
+            0,
+            3010
+        )
+    ) {
+
+        foreach (
+            $SoftPaq in $DownloadedSoftPaqs
+        ) {
+
+            [void]$InstalledSoftPaqs.Add(
+                $SoftPaq
+            )
+        }
+
+
+        $DetectionSource =
+            'SuccessfulHPIAExitAndCycleDownloads'
+
+
+        $EstimateUsed =
+            $true
+    }
+
+
+    if (
+        $DownloadedSoftPaqs.Count -eq 0 -and
+        $ExitCodeAvailable -and
+        $ExitCode -in @(
+            0,
+            256,
+            257,
+            3010
+        )
+    ) {
+
+        $DetectionSource =
+            'NoCycleDownloads'
+    }
+
+
+    $InstalledCount =
+        if (
+            $InstalledSoftPaqs.Count -gt 0 -or
+            (
+                $DownloadedSoftPaqs.Count -eq 0 -and
+                $ExitCodeAvailable -and
+                $ExitCode -in @(
+                    0,
+                    256,
+                    257,
+                    3010
+                )
+            )
+        ) {
+
+            [int]$InstalledSoftPaqs.Count
+        }
+        else {
+
+            $null
+        }
+
+
+    return [PSCustomObject]@{
+
+        Installed =
+            $InstalledCount
+
+        InstalledSoftPaqs =
+            @(
+                $InstalledSoftPaqs
+            )
+
+        DetectionSource =
+            $DetectionSource
+
+        EstimateUsed =
+            $EstimateUsed
+    }
+}
+
+
 function Write-HPIAReportSummary {
 
     param(
@@ -4810,7 +5114,13 @@ function Write-HPIAReportSummary {
         [bool]$ExitCodeAvailable,
 
         [AllowNull()]
-        [Nullable[int]]$ExitCode
+        [Nullable[int]]$ExitCode,
+
+        [Parameter(Mandatory)]
+        [int]$DeploymentCycle,
+
+        [Parameter(Mandatory)]
+        [string]$CycleWorkingPath
     )
 
 
@@ -5245,7 +5555,32 @@ function Write-HPIAReportSummary {
 
 
     # ========================================================
-    # PHASE 10.3 - RETURN STRUCTURED HPIA TELEMETRY
+    # PHASE 10.14 - INSTALLED TELEMETRY
+    # ========================================================
+
+    $InstallTelemetry =
+        Get-HPIAInstalledTelemetry `
+            -ResultFile $ResultFile `
+            -SoftPaqFiles @($SoftPaqFiles) `
+            -ExitCodeAvailable $ExitCodeAvailable `
+            -ExitCode $ExitCode
+
+
+    Write-Log -Message (
+        'HPIA installed SoftPaq package count: ' +
+        "$($InstallTelemetry.Installed)"
+    )
+
+
+    Write-Log -Message (
+        'HPIA installed telemetry source: ' +
+        "$($InstallTelemetry.DetectionSource); " +
+        "Estimated=$($InstallTelemetry.EstimateUsed)"
+    )
+
+
+    # ========================================================
+    # PHASE 10.14 - RETURN STRUCTURED HPIA TELEMETRY
     # ========================================================
 
     return [PSCustomObject]@{
@@ -5259,6 +5594,35 @@ function Write-HPIAReportSummary {
             @(
                 $SoftPaqFiles
             ).Count
+
+        Installed =
+            $InstallTelemetry.Installed
+
+        InstalledSoftPaqs =
+            @(
+                $InstallTelemetry.InstalledSoftPaqs
+            )
+
+        InstalledDetectionSource =
+            $InstallTelemetry.DetectionSource
+
+        InstalledEstimateUsed =
+            $InstallTelemetry.EstimateUsed
+
+        DeploymentCycle =
+            $DeploymentCycle
+
+        CycleWorkingPath =
+            $CycleWorkingPath
+
+        ReportFolder =
+            $ReportFolder
+
+        DownloadFolder =
+            $DownloadFolder
+
+        ResultFile =
+            $ResultFile
 
         OutputFileCount =
             @(
@@ -5383,6 +5747,80 @@ function Write-HPUpdateResult {
                         $null
                     }
 
+                Installed =
+                    if ($Summary) {
+                        $Summary.Installed
+                    }
+                    else {
+                        $null
+                    }
+
+                InstalledSoftPaqs =
+                    if ($Summary) {
+                        @(
+                            $Summary.InstalledSoftPaqs
+                        )
+                    }
+                    else {
+                        @()
+                    }
+
+                InstalledDetectionSource =
+                    if ($Summary) {
+                        $Summary.InstalledDetectionSource
+                    }
+                    else {
+                        $null
+                    }
+
+                InstalledEstimateUsed =
+                    if ($Summary) {
+                        $Summary.InstalledEstimateUsed
+                    }
+                    else {
+                        $false
+                    }
+
+                DeploymentCycle =
+                    if ($Summary) {
+                        $Summary.DeploymentCycle
+                    }
+                    else {
+                        $null
+                    }
+
+                CycleWorkingPath =
+                    if ($Summary) {
+                        $Summary.CycleWorkingPath
+                    }
+                    else {
+                        $null
+                    }
+
+                ReportFolder =
+                    if ($Summary) {
+                        $Summary.ReportFolder
+                    }
+                    else {
+                        $null
+                    }
+
+                DownloadFolder =
+                    if ($Summary) {
+                        $Summary.DownloadFolder
+                    }
+                    else {
+                        $null
+                    }
+
+                ResultFile =
+                    if ($Summary) {
+                        $Summary.ResultFile
+                    }
+                    else {
+                        $null
+                    }
+
                 OutputFileCount =
                     if ($Summary) {
                         $Summary.OutputFileCount
@@ -5433,9 +5871,13 @@ function Write-HPUpdateResult {
             }
 
 
-        $Result |
+        $ResultJson =
+            $Result |
             ConvertTo-Json `
-                -Depth 10 |
+                -Depth 10
+
+
+        $ResultJson |
             Set-Content `
                 -LiteralPath $ResultPath `
                 -Encoding UTF8
@@ -5444,6 +5886,31 @@ function Write-HPUpdateResult {
         Write-Log -Message (
             "HP update result saved to '$ResultPath'."
         )
+
+
+        if (
+            $Summary -and
+            -not [string]::IsNullOrWhiteSpace(
+                [string]$Summary.CycleWorkingPath
+            )
+        ) {
+
+            $CycleResultPath =
+                Join-Path `
+                    $Summary.CycleWorkingPath `
+                    'HPUpdateResult.json'
+
+
+            $ResultJson |
+                Set-Content `
+                    -LiteralPath $CycleResultPath `
+                    -Encoding UTF8
+
+
+            Write-Log -Message (
+                "HP cycle update result saved to '$CycleResultPath'."
+            )
+        }
 
 
         $script:HPUpdateTelemetry =
@@ -5495,21 +5962,94 @@ function Invoke-HPDriverUpdate {
             'HP'
 
 
-    $DownloadFolder =
+    # ========================================================
+    # PHASE 10.14 - HPIA CYCLE ISOLATION
+    # ========================================================
+    #
+    # The controller exposes the current deployment cycle through
+    # ITINO_DEPLOYMENT_CYCLE. Each HPIA cycle receives a fresh
+    # Reports and Downloads tree so Cycle 2 cannot count files
+    # created by Cycle 1.
+    #
+    # If 03 is run directly outside the controller, use a unique
+    # standalone folder instead of reusing a stale Cycle1 folder.
+    # ========================================================
+
+    $DeploymentCycle =
+        0
+
+
+    $CycleFolderName =
+        $null
+
+
+    if (
+        [int]::TryParse(
+            [string]$env:ITINO_DEPLOYMENT_CYCLE,
+            [ref]$DeploymentCycle
+        ) -and
+        $DeploymentCycle -gt 0
+    ) {
+
+        $CycleFolderName =
+            "Cycle$DeploymentCycle"
+    }
+    else {
+
+        $DeploymentCycle =
+            0
+
+
+        $CycleFolderName =
+            (
+                'Standalone-' +
+                (Get-Date -Format 'yyyyMMdd-HHmmss')
+            )
+    }
+
+
+    $CycleWorkingPath =
         Join-Path `
             $HPWorkingPath `
+            $CycleFolderName
+
+
+    $DownloadFolder =
+        Join-Path `
+            $CycleWorkingPath `
             'Downloads'
 
 
     $ReportFolder =
         Join-Path `
-            $HPWorkingPath `
+            $CycleWorkingPath `
             'Reports'
+
+
+    if (
+        Test-Path `
+            -LiteralPath $CycleWorkingPath `
+            -PathType Container
+    ) {
+
+        Write-Log -Message (
+            'Removing existing HPIA cycle working folder before ' +
+            "starting a fresh run: $CycleWorkingPath"
+        )
+
+
+        Remove-Item `
+            -LiteralPath $CycleWorkingPath `
+            -Recurse `
+            -Force `
+            -ErrorAction Stop
+    }
 
 
     foreach (
         $Directory in @(
             $HPWorkingPath,
+            $CycleWorkingPath,
             $DownloadFolder,
             $ReportFolder
         )
@@ -5526,6 +6066,16 @@ function Invoke-HPDriverUpdate {
                 Out-Null
         }
     }
+
+
+    Write-Log -Message (
+        "HPIA deployment cycle: $DeploymentCycle"
+    )
+
+
+    Write-Log -Message (
+        "HPIA cycle working folder: $CycleWorkingPath"
+    )
 
 
     # Use stable filenames so the deployment always knows
@@ -5553,8 +6103,9 @@ function Invoke-HPDriverUpdate {
             'HPIA-InstallResults.html'
 
 
-    # Remove only the previous HPIA report files.
-    # Downloaded SoftPaqs are retained so they can be inventoried.
+    # The complete cycle folder was recreated above, so these
+    # paths are already fresh. Keep this small cleanup guard for
+    # compatibility if HPIA created a file before this point.
 
     foreach (
         $PreviousReport in @(
@@ -5613,14 +6164,16 @@ function Invoke-HPDriverUpdate {
 
         $HPIASummary =
             Write-HPIAReportSummary `
-                -HPWorkingPath $HPWorkingPath `
+                -HPWorkingPath $CycleWorkingPath `
                 -ReportFolder $ReportFolder `
                 -RecommendationXml $RecommendationXml `
                 -RecommendationHtml $RecommendationHtml `
                 -ResultFile $ResultFile `
                 -DownloadFolder $DownloadFolder `
                 -ExitCodeAvailable $Process.ExitCodeAvailable `
-                -ExitCode $Process.ExitCode
+                -ExitCode $Process.ExitCode `
+                -DeploymentCycle $DeploymentCycle `
+                -CycleWorkingPath $CycleWorkingPath
     }
     catch {
 
@@ -5640,6 +6193,15 @@ function Invoke-HPDriverUpdate {
             [PSCustomObject]@{
                 Recommendations = $null
                 Downloaded = $null
+                Installed = $null
+                InstalledSoftPaqs = @()
+                InstalledDetectionSource = 'ReportingUnavailable'
+                InstalledEstimateUsed = $false
+                DeploymentCycle = $DeploymentCycle
+                CycleWorkingPath = $CycleWorkingPath
+                ReportFolder = $ReportFolder
+                DownloadFolder = $DownloadFolder
+                ResultFile = $ResultFile
                 OutputFileCount = $null
                 OutputFiles = @()
                 SoftPaqs = @()
@@ -9091,11 +9653,17 @@ try {
         $OEMDownloaded =
             $script:HPUpdateTelemetry.Downloaded
 
+        $OEMInstalled =
+            $script:HPUpdateTelemetry.Installed
+
         $OEMNotes =
             (
-                'Phase 10.3 HP telemetry. ' +
+                'Phase 10.14 HP telemetry. ' +
                 "HPIAStatus=$($script:HPUpdateTelemetry.Status); " +
                 "HPIAExitCode=$($script:HPUpdateTelemetry.ExitCode); " +
+                "Cycle=$($script:HPUpdateTelemetry.DeploymentCycle); " +
+                "InstalledSource=$($script:HPUpdateTelemetry.InstalledDetectionSource); " +
+                "InstalledEstimated=$($script:HPUpdateTelemetry.InstalledEstimateUsed); " +
                 "OutputFiles=$($script:HPUpdateTelemetry.OutputFileCount)."
             )
 
