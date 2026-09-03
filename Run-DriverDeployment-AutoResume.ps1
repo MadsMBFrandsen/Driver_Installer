@@ -298,6 +298,14 @@ $AutoResumeLogPath =
         $AutoResumeLogDirectory `
         'AutoResume.log'
 
+$TempAutoResumeLogDirectory =
+    'C:\Windows\Temp\ITINO-Deployment\Driver'
+
+$TempAutoResumeLogPath =
+    Join-Path `
+        $TempAutoResumeLogDirectory `
+        'AutoResume.log'
+
 
 # ============================================================
 # HELPERS
@@ -405,6 +413,29 @@ function Write-AutoResumeLog {
                     -ErrorAction Stop
             }
         }
+
+
+        # Keep an independent live copy in Windows Temp. This copy survives
+        # the controller's production cleanup of C:\ProgramData\Itino.
+        if (-not (
+            Test-Path `
+                -LiteralPath $TempAutoResumeLogDirectory `
+                -PathType Container
+        )) {
+
+            New-Item `
+                -ItemType Directory `
+                -Path $TempAutoResumeLogDirectory `
+                -Force `
+                -ErrorAction Stop |
+            Out-Null
+        }
+
+        Add-Content `
+            -LiteralPath $TempAutoResumeLogPath `
+            -Value $Line `
+            -Encoding UTF8 `
+            -ErrorAction Stop
     }
     catch {
 

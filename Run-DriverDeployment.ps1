@@ -1167,6 +1167,44 @@ function Copy-ItinoLogsToScriptLocation {
 }
 
 
+function Publish-ItinoArtifactsToTemp {
+    <#
+        Copies the current driver deployment logs, JSON reports and restart
+        markers to a stable Windows Temp folder before cleanup or exit.
+        Publishing is best effort and never changes the controller result.
+    #>
+
+    $TempPublishPath =
+        'C:\Windows\Temp\ITINO-Deployment\Driver'
+
+    try {
+        if (-not (Test-Path -LiteralPath $TempPublishPath)) {
+            New-Item -ItemType Directory -Path $TempPublishPath -Force -ErrorAction Stop | Out-Null
+        }
+
+        if (Test-Path -LiteralPath $ItinoRoot -PathType Container) {
+            foreach ($File in @(Get-ChildItem -LiteralPath $ItinoRoot -File -Recurse -ErrorAction SilentlyContinue)) {
+                $RelativeName = $File.FullName.Substring($ItinoRoot.Length).TrimStart('\')
+                $Destination = Join-Path $TempPublishPath $RelativeName
+                $DestinationDirectory = Split-Path -Parent $Destination
+
+                if (-not (Test-Path -LiteralPath $DestinationDirectory)) {
+                    New-Item -ItemType Directory -Path $DestinationDirectory -Force -ErrorAction Stop | Out-Null
+                }
+
+                Copy-Item -LiteralPath $File.FullName -Destination $Destination -Force -ErrorAction Stop
+            }
+        }
+    }
+    catch {
+        Write-Host (
+            'WARNING: Driver artifacts could not be copied to the temporary ' +
+            "handoff folder. Reason: $($_.Exception.Message)"
+        )
+    }
+}
+
+
 function Stop-ItinoConsoleTranscript {
 
     if (-not $script:ConsoleTranscriptStarted) {
@@ -4681,13 +4719,14 @@ Write-Host 'Final Result'
         -ExitCode $FinalExitCode `
         -Status $OverallStatus
 
-
     if (
         $FinalExitCode -eq 3010
     ) {
 
         Save-ItinoDeploymentSession `
             -Status 'RestartRequired'
+
+        Publish-ItinoArtifactsToTemp
 
         Write-Log `
             -Message (
@@ -4702,6 +4741,8 @@ Write-Host 'Final Result'
 
         Save-ItinoDeploymentSession `
             -Status 'Failed'
+
+        Publish-ItinoArtifactsToTemp
 
         if ($PreserveArtifactsOnFailure) {
             Write-Log `
@@ -4719,6 +4760,9 @@ Write-Host 'Final Result'
 
         Save-ItinoDeploymentSession `
             -Status 'Success'
+
+        # Must run before final success cleanup removes C:\ProgramData\Itino.
+        Publish-ItinoArtifactsToTemp
 
         Remove-EntireItinoRoot
     }
@@ -4860,6 +4904,8 @@ catch {
     }
     catch {
     }
+
+    Publish-ItinoArtifactsToTemp
 
 
     if (-not $PreserveArtifactsOnFailure) {
