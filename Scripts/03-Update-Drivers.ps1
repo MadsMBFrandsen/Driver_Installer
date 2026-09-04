@@ -60,6 +60,26 @@ $ScriptName =
 # ============================================================
 
 # ------------------------------------------------------------
+# Title   : Windows Update Service Recovery Retry
+# Version : 1.5.12
+# Reason  : Retries WU_E_SERVICE_STOP up to three times when no
+#           restart is pending. Starts stopped update services,
+#           waits, and creates a fresh Windows Update COM session
+#           before each retry. Restart boundaries still return 3010.
+# Date    : 2026-09-04
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
+# Title   : Windows Update Restart Boundary Handling
+# Version : 1.5.11
+# Reason  : Treats WU_E_SERVICE_STOP (0x8024001E) as a controlled
+#           restart boundary only after this run successfully
+#           installed driver updates and recorded that a restart
+#           is required. All other occurrences remain failures.
+# Date    : 2026-09-04
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
 # Title   : HP Cycle Isolation and Installed Telemetry
 # Version : 1.5.6
 # Reason  : Stores HPIA reports and downloads in a fresh folder
@@ -201,10 +221,10 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.5.10'
+    '1.5.12'
 
 $ScriptUpdated =
-    '2026-08-31'
+    '2026-09-04'
 
 
 
@@ -273,6 +293,13 @@ $script:WindowsUpdateFinalTelemetry =
 
 $script:WindowsUpdateFallbackRunTelemetry =
     $null
+
+# Set when Windows Update has installed drivers, requested a
+# restart and then stops its service before a later pass. The
+# remaining OEM work is deferred until the controller resumes
+# the deployment after the verified Windows restart.
+$script:StopDriverStageForRestart =
+    $false
 
 
 function Get-ItinoProjectMetadata {
@@ -2372,6 +2399,113 @@ function Stop-ItinoDownloadActivityMonitor {
 # WINDOWS UPDATE DRIVER UPDATE
 # ============================================================
 
+function Test-WindowsUpdateServiceStopError {
+
+    param(
+        [Parameter(Mandatory)]
+        [System.Exception]$Exception
+    )
+
+
+    $CurrentException =
+        $Exception
+
+
+    while ($CurrentException) {
+
+        if (
+            [int64]$CurrentException.HResult -eq
+            -2145124322
+        ) {
+
+            return $true
+        }
+
+
+        $CurrentException =
+            $CurrentException.InnerException
+    }
+
+
+    return $false
+}
+
+
+function Restore-WindowsUpdateServiceAvailability {
+
+    param(
+        [int]$WaitSeconds = 20
+    )
+
+
+    Write-Log `
+        -Message (
+            'Attempting to recover Windows Update service availability.'
+        ) `
+        -Level 'WARNING'
+
+
+    foreach (
+        $ServiceName in @(
+            'cryptsvc'
+            'bits'
+            'wuauserv'
+        )
+    ) {
+
+        try {
+
+            $Service =
+                Get-Service `
+                    -Name $ServiceName `
+                    -ErrorAction Stop
+
+
+            if (
+                $Service.Status -ne
+                'Running'
+            ) {
+
+                Start-Service `
+                    -Name $ServiceName `
+                    -ErrorAction Stop
+
+
+                $Service.WaitForStatus(
+                    [System.ServiceProcess.ServiceControllerStatus]::Running,
+                    [TimeSpan]::FromSeconds(30)
+                )
+            }
+
+
+            $Service.Refresh()
+
+
+            Write-Log -Message (
+                "Windows service '$ServiceName' status: $($Service.Status)."
+            )
+        }
+        catch {
+
+            Write-Log `
+                -Message (
+                    "Could not start Windows service '$ServiceName': " +
+                    "$($_.Exception.Message)"
+                ) `
+                -Level 'WARNING'
+        }
+    }
+
+
+    Request-WindowsUpdateScan
+
+
+    Invoke-ItinoCountdown `
+        -Seconds $WaitSeconds `
+        -Message 'Waiting before the Windows Update search retry.'
+}
+
+
 function Invoke-WindowsUpdateDriverUpdate {
 
     param(
@@ -2542,38 +2676,161 @@ function Invoke-WindowsUpdateDriverUpdate {
                 )
 
 
-                $SearchStopwatch =
-                    [System.Diagnostics.Stopwatch]::StartNew()
+                $MaximumSearchAttempts =
+                    3
 
 
-                $SearchHeartbeat =
-                    Start-ItinoNativeConsoleHeartbeat `
-                        -Message (
-                            "$PhaseName pass ${Pass}: Windows Update is still searching for applicable drivers..."
-                        ) `
-                        -IntervalSeconds 15
-
-
-                try {
-
-                    $SearchResult =
-                        $UpdateSearcher.Search(
-                            "IsInstalled=0 and IsHidden=0 and Type='Driver'"
-                        )
-                }
-                finally {
-
-                    $SearchStopwatch.Stop()
-
-
-                    Stop-ItinoNativeConsoleHeartbeat `
-                        -Heartbeat $SearchHeartbeat
-
+                for (
+                    $SearchAttempt = 1;
+                    $SearchAttempt -le $MaximumSearchAttempts;
+                    $SearchAttempt++
+                ) {
 
                     Write-Log -Message (
-                        "$PhaseName pass ${Pass}: Windows Update search returned. Duration: " +
-                        "$($SearchStopwatch.Elapsed.ToString('hh\:mm\:ss'))."
+                        "$PhaseName pass ${Pass}: Windows Update search attempt " +
+                        "$SearchAttempt of $MaximumSearchAttempts."
                     )
+
+
+                    $SearchStopwatch =
+                        [System.Diagnostics.Stopwatch]::StartNew()
+
+
+                    $SearchHeartbeat =
+                        Start-ItinoNativeConsoleHeartbeat `
+                            -Message (
+                                "$PhaseName pass ${Pass}: Windows Update is still searching for applicable drivers..."
+                            ) `
+                            -IntervalSeconds 15
+
+
+                    try {
+
+                        $SearchResult =
+                            $UpdateSearcher.Search(
+                                "IsInstalled=0 and IsHidden=0 and Type='Driver'"
+                            )
+
+
+                        break
+                    }
+                    catch {
+
+                        $IsWindowsUpdateServiceStop =
+                            Test-WindowsUpdateServiceStopError `
+                                -Exception $_.Exception
+
+
+                        if (-not $IsWindowsUpdateServiceStop) {
+
+                            throw
+                        }
+
+
+                        if (
+                            $TotalInstalled -gt 0 -and
+                            $InstalledItems.Count -gt 0 -and
+                            $WindowsUpdateRestartRequired
+                        ) {
+
+                            $WindowsUpdateStatus =
+                                'SuccessRestartRequired'
+
+
+                            $script:StopDriverStageForRestart =
+                                $true
+
+
+                            Write-Log `
+                                -Message (
+                                    "$PhaseName pass ${Pass}: Windows Update returned " +
+                                    'WU_E_SERVICE_STOP (0x8024001E) after this run ' +
+                                    "successfully installed $TotalInstalled driver update(s) " +
+                                    'and requested a restart. The remaining update passes ' +
+                                    'and OEM work are deferred until the deployment resumes ' +
+                                    'after restart.'
+                                ) `
+                                -Level 'WARNING'
+
+
+                            return
+                        }
+
+
+                        if (
+                            $SearchAttempt -ge
+                            $MaximumSearchAttempts
+                        ) {
+
+                            throw (
+                                "$PhaseName pass ${Pass}: Windows Update remained " +
+                                "unavailable after $MaximumSearchAttempts search attempts. " +
+                                'Last error: WU_E_SERVICE_STOP (0x8024001E).'
+                            )
+                        }
+
+
+                        Write-Log `
+                            -Message (
+                                "$PhaseName pass ${Pass}: Windows Update returned " +
+                                'WU_E_SERVICE_STOP (0x8024001E), but no restart is ' +
+                                'pending. Starting stopped update services and retrying.'
+                            ) `
+                            -Level 'WARNING'
+
+
+                        Restore-WindowsUpdateServiceAvailability `
+                            -WaitSeconds $RetryWaitSeconds
+
+
+                        Remove-ComObject `
+                            -Object $UpdateSearcher
+
+
+                        Remove-ComObject `
+                            -Object $UpdateSession
+
+
+                        $UpdateSearcher =
+                            $null
+
+
+                        $UpdateSession =
+                            $null
+
+
+                        [GC]::Collect()
+
+                        [GC]::WaitForPendingFinalizers()
+
+
+                        $UpdateSession =
+                            New-Object `
+                                -ComObject 'Microsoft.Update.Session'
+
+
+                        $UpdateSession.ClientApplicationID =
+                            'ITINO Driver Deployment'
+
+
+                        $UpdateSearcher =
+                            $UpdateSession.CreateUpdateSearcher()
+                    }
+                    finally {
+
+                        $SearchStopwatch.Stop()
+
+
+                        Stop-ItinoNativeConsoleHeartbeat `
+                            -Heartbeat $SearchHeartbeat
+
+
+                        Write-Log -Message (
+                            "$PhaseName pass ${Pass}: Windows Update search attempt " +
+                            "$SearchAttempt returned. Duration: " +
+                            "$($SearchStopwatch.Elapsed.ToString('hh\:mm\:ss'))."
+                        )
+                    }
                 }
 
 
@@ -9266,6 +9523,20 @@ function Invoke-OEMDriverSequence {
         -RetryWaitSeconds $WindowsUpdateRetryWaitSeconds
 
 
+    if ($script:StopDriverStageForRestart) {
+
+        Write-Log `
+            -Message (
+                "$OEMName OEM processing is deferred until the " +
+                'deployment resumes after restart.'
+            ) `
+            -Level 'WARNING'
+
+
+        return
+    }
+
+
     Write-Log -Message (
         '============================================================'
     )
@@ -9320,6 +9591,20 @@ function Invoke-OEMDriverSequence {
         -MaximumDownloadRetries $MaximumDownloadAttempts `
         -PassDelaySeconds $WindowsUpdatePassDelaySeconds `
         -RetryWaitSeconds $WindowsUpdateRetryWaitSeconds
+
+
+    if ($script:StopDriverStageForRestart) {
+
+        Write-Log `
+            -Message (
+                "$OEMName final processing is deferred until the " +
+                'deployment resumes after restart.'
+            ) `
+            -Level 'WARNING'
+
+
+        return
+    }
 
 
     if ($AfterFinalWindowsUpdate) {
@@ -10575,5 +10860,4 @@ catch {
 
     exit 1
 }
-
 
