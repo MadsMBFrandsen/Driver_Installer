@@ -144,10 +144,10 @@ $ScriptName =
 # ------------------------------------------------------------
 
 $ScriptVersion =
-    '1.1.17'
+    '1.1.20'
 
 $ScriptUpdated =
-    '2026-08-31'
+    '2026-09-04'
 
 
 # ============================================================
@@ -695,9 +695,9 @@ $DriverRollbackRoot =
 
 $Scripts =
     @(
-	
+
 		[PSCustomObject]@{
-	
+
             Name =
                 'Preflight'
 
@@ -1634,7 +1634,7 @@ function Save-DeploymentErrorLog {
 
 
         $ErrorLogContent +=
-            $DeploymentOutputBuffer
+            $DeploymentOutputBuffer.ToArray()
 
 
         $ErrorLogContent |
@@ -1675,6 +1675,32 @@ $script:DeploymentSession =
 
 $script:ControllerSpecialExitCode =
     $null
+
+$script:ControllerSpecialMessage =
+    $null
+
+
+function Get-ItinoWindowsBootTime {
+
+    try {
+        $OperatingSystem =
+            Get-CimInstance `
+                -ClassName Win32_OperatingSystem `
+                -ErrorAction Stop
+
+        if ($null -eq $OperatingSystem.LastBootUpTime) {
+            throw 'Win32_OperatingSystem.LastBootUpTime was empty.'
+        }
+
+        return ([datetime]$OperatingSystem.LastBootUpTime).ToUniversalTime()
+    }
+    catch {
+        throw (
+            'Windows boot time could not be read. ' +
+            "Reason: $($_.Exception.Message)"
+        )
+    }
+}
 
 
 function Enter-ItinoDeploymentMutex {
@@ -1799,16 +1825,135 @@ function Initialize-ItinoDeploymentSession {
         )
     ) {
 
-        $Cycle =
-            ([int]$Existing.Cycle) + 1
+        if ([string]$Existing.Status -eq 'RestartRequired') {
+            $SavedBootTimeProperty =
+                $Existing.PSObject.Properties['BootTimeAtRestartRequest']
 
-        if (
-            $Cycle -gt $MaximumDeploymentCycles
-        ) {
-            throw (
-                'Maximum driver deployment cycles exceeded. ' +
-                "Maximum=$MaximumDeploymentCycles; NextCycle=$Cycle."
-            )
+            if (
+                $null -ne $SavedBootTimeProperty -and
+                -not [string]::IsNullOrWhiteSpace(
+                    [string]$SavedBootTimeProperty.Value
+                )
+            ) {
+                try {
+                    $SavedBootTime =
+                        ([datetime]$SavedBootTimeProperty.Value).ToUniversalTime()
+
+                    $CurrentBootTime =
+                        Get-ItinoWindowsBootTime
+                }
+                catch {
+                    throw (
+                        'The requested restart could not be verified. ' +
+                        $_.Exception.Message
+                    )
+                }
+
+                if ($CurrentBootTime -le $SavedBootTime) {
+                    $script:DeploymentSession =
+                        $Existing
+
+                    $script:ControllerSpecialExitCode =
+                        3010
+
+                    $script:ControllerSpecialMessage =
+                        (
+                            'Windows has not restarted since the previous ' +
+                            'driver cycle requested a restart. ' +
+                            "SavedBootTime=$($SavedBootTime.ToString('o')); " +
+                            "CurrentBootTime=$($CurrentBootTime.ToString('o')); " +
+                            "Cycle=$($Existing.Cycle)."
+                        )
+
+                    throw $script:ControllerSpecialMessage
+                }
+
+                Write-Log -Message (
+                    'Windows restart verified by boot time. ' +
+                    "PreviousBootTime=$($SavedBootTime.ToString('o')); " +
+                    "CurrentBootTime=$($CurrentBootTime.ToString('o'))."
+                )
+            }
+            else {
+                Write-Log -Message (
+                    'Existing restart state does not contain a saved boot ' +
+                    'time. Allowing this resume once for compatibility with ' +
+                    'deployment state created by an older controller version.'
+                ) -Level 'WARNING'
+            }
+        }
+
+        $ExistingFinalVerificationOnly =
+            $false
+
+        $ExistingFinalVerificationProperty =
+            $Existing.PSObject.Properties['FinalVerificationOnly']
+
+        if ($null -ne $ExistingFinalVerificationProperty) {
+            $ExistingFinalVerificationOnly =
+                [bool]$ExistingFinalVerificationProperty.Value
+        }
+
+        if ([string]$Existing.Status -eq 'RestartRequired') {
+            # Only a verified Windows restart advances the deployment cycle.
+            $Cycle =
+                ([int]$Existing.Cycle) + 1
+
+            $FinalVerificationOnly =
+                $false
+
+            if ($Cycle -gt $MaximumDeploymentCycles) {
+                if (
+                    [int]$Existing.Cycle -eq $MaximumDeploymentCycles -and
+                    $Cycle -eq ($MaximumDeploymentCycles + 1)
+                ) {
+                    # The final installation cycle legitimately requested a
+                    # restart. Allow one post-restart verification invocation,
+                    # but do not run the OEM installation stages again.
+                    $FinalVerificationOnly =
+                        $true
+                }
+                else {
+                    throw (
+                        'Maximum driver deployment cycles exceeded. ' +
+                        "Maximum=$MaximumDeploymentCycles; NextCycle=$Cycle."
+                    )
+                }
+            }
+        }
+        else {
+            # A previous controller invocation was interrupted. Resume the
+            # same cycle instead of treating the interruption as a restart.
+            $Cycle =
+                [int]$Existing.Cycle
+
+            $FinalVerificationOnly =
+                $ExistingFinalVerificationOnly
+
+            if ($Cycle -gt ($MaximumDeploymentCycles + 1)) {
+                throw (
+                    'The saved driver deployment cycle is invalid. ' +
+                    "MaximumAllowed=$($MaximumDeploymentCycles + 1); " +
+                    "SavedCycle=$Cycle."
+                )
+            }
+
+            Write-Log -Message (
+                'An interrupted driver deployment was detected. Resuming ' +
+                "the same cycle without advancing. Cycle=$Cycle; " +
+                "FinalVerificationOnly=$FinalVerificationOnly."
+            ) -Level 'WARNING'
+        }
+
+        $ExistingRestartBootTime =
+            $null
+
+        $ExistingRestartBootTimeProperty =
+            $Existing.PSObject.Properties['BootTimeAtRestartRequest']
+
+        if ($null -ne $ExistingRestartBootTimeProperty) {
+            $ExistingRestartBootTime =
+                [string]$ExistingRestartBootTimeProperty.Value
         }
 
         $script:DeploymentSession =
@@ -1819,6 +1964,8 @@ function Initialize-ItinoDeploymentSession {
                 LastUpdated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
                 Cycle = $Cycle
                 MaximumCycles = $MaximumDeploymentCycles
+                FinalVerificationOnly = $FinalVerificationOnly
+                BootTimeAtRestartRequest = $ExistingRestartBootTime
                 Status = 'InProgress'
             }
     }
@@ -1832,6 +1979,8 @@ function Initialize-ItinoDeploymentSession {
                 LastUpdated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
                 Cycle = 1
                 MaximumCycles = $MaximumDeploymentCycles
+                FinalVerificationOnly = $false
+                BootTimeAtRestartRequest = $null
                 Status = 'InProgress'
             }
     }
@@ -1844,6 +1993,9 @@ function Initialize-ItinoDeploymentSession {
     $env:ITINO_DEPLOYMENT_CYCLE =
         [string]$script:DeploymentSession.Cycle
 
+    $script:FinalVerificationOnly =
+        [bool]$script:DeploymentSession.FinalVerificationOnly
+
 
     Write-ItinoProjectMetadata
 
@@ -1851,7 +2003,8 @@ function Initialize-ItinoDeploymentSession {
     Write-Log -Message (
         'Deployment session: ' +
         "$($script:DeploymentSession.SessionId); " +
-        "Cycle=$($script:DeploymentSession.Cycle)/$MaximumDeploymentCycles"
+        "Cycle=$($script:DeploymentSession.Cycle)/$MaximumDeploymentCycles; " +
+        "FinalVerificationOnly=$($script:FinalVerificationOnly)"
     )
 }
 
@@ -2195,6 +2348,19 @@ function Save-ItinoMachineReadableResult {
         [string]$Status
     )
 
+    $RestartRequestBootTime =
+        $null
+
+    if ($script:DeploymentSession) {
+        $RestartRequestBootTimeProperty =
+            $script:DeploymentSession.PSObject.Properties['BootTimeAtRestartRequest']
+
+        if ($null -ne $RestartRequestBootTimeProperty) {
+            $RestartRequestBootTime =
+                $RestartRequestBootTimeProperty.Value
+        }
+    }
+
     [pscustomobject]@{
         ComputerName = $env:COMPUTERNAME
         SessionId =
@@ -2211,6 +2377,8 @@ function Save-ItinoMachineReadableResult {
             else {
                 $null
             }
+        FinalVerificationOnly = $script:FinalVerificationOnly
+        BootTimeAtRestartRequest = $RestartRequestBootTime
         Status = $Status
         ExitCode = $ExitCode
         RestartRequired = ($ExitCode -eq 3010)
@@ -3349,6 +3517,10 @@ $FinalExitCode =
     1
 
 
+$script:FinalVerificationOnly =
+    $false
+
+
 # ============================================================
 # MAIN
 # ============================================================
@@ -3661,12 +3833,38 @@ try {
     # RUN STAGES
     # ========================================================
 
+    $ScriptsToRun =
+        if ($script:FinalVerificationOnly) {
+            @(
+                $Scripts |
+                    Where-Object {
+                        $_.Name -eq 'Verify Drivers'
+                    }
+            )
+        }
+        else {
+            @($Scripts)
+        }
+
+
+    if ($script:FinalVerificationOnly) {
+        Write-Log -Message (
+            'The maximum installation cycle requested a restart. ' +
+            'Starting the single final verification-only cycle. OEM tool ' +
+            'installation and driver update stages will not run again.'
+        ) -Level 'WARNING'
+
+        if ($ScriptsToRun.Count -ne 1) {
+            throw 'The Verify Drivers stage could not be selected for final verification.'
+        }
+    }
+
     $ControllerStartTime =
         Get-Date
 
 
     foreach (
-        $Script in $Scripts
+        $Script in $ScriptsToRun
     ) {
 
         if (
@@ -3780,6 +3978,27 @@ try {
                 'RestartRequired.txt exists. A restart is required.'
             ) `
             -Level 'WARNING'
+    }
+
+
+    if (
+        $script:FinalVerificationOnly -and
+        $RestartRequired -and
+        -not $DeploymentFailed
+    ) {
+        # A final verification cycle is the last allowed invocation. Do not
+        # return 3010 again and create an endless restart loop.
+        $DeploymentFailed =
+            $true
+
+        $FailedStage =
+            'Final Driver Verification'
+
+        Write-Log -Message (
+            'Final verification still reports that another restart is ' +
+            'required after the maximum installation cycle. Stopping with ' +
+            'exit code 1 instead of creating another restart loop.'
+        ) -Level 'ERROR'
     }
 
 
@@ -4250,6 +4469,7 @@ try {
                     $null
                 }
             MaximumDeploymentCycles = $MaximumDeploymentCycles
+            FinalVerificationOnly = $script:FinalVerificationOnly
             CompletionTime = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
             Status = $OverallStatus
             RestartRequired = $RestartRequired
@@ -4723,6 +4943,17 @@ Write-Host 'Final Result'
         $FinalExitCode -eq 3010
     ) {
 
+        $RestartRequestBootTime =
+            Get-ItinoWindowsBootTime
+
+        $script:DeploymentSession.BootTimeAtRestartRequest =
+            $RestartRequestBootTime.ToString('o')
+
+        Write-Log -Message (
+            'Saved Windows boot time for restart verification: ' +
+            $script:DeploymentSession.BootTimeAtRestartRequest
+        )
+
         Save-ItinoDeploymentSession `
             -Status 'RestartRequired'
 
@@ -4792,6 +5023,51 @@ catch {
 
     $ErrorMessage =
         $_.Exception.Message
+
+
+    # ========================================================
+    # SPECIAL RESULT: RESTART HAS NOT OCCURRED YET
+    # ========================================================
+
+    if (
+        $script:ControllerSpecialExitCode -eq 3010
+    ) {
+        Write-Host ''
+        Write-Host '============================================================'
+        Write-Host 'ITINO Driver Deployment'
+        Write-Host '============================================================'
+        Write-Host ''
+        Write-Host 'A Windows restart is still required.'
+        Write-Host $script:ControllerSpecialMessage
+        Write-Host ''
+        Write-Host 'The deployment cycle was not advanced.'
+        Write-Host 'Exit Code : 3010'
+        Write-Host ''
+
+        try {
+            Write-Log -Message $script:ControllerSpecialMessage -Level 'WARNING'
+
+            Save-ItinoMachineReadableResult `
+                -ExitCode 3010 `
+                -Status 'RestartRequired'
+
+            Save-ItinoDeploymentSession `
+                -Status 'RestartRequired'
+
+            Publish-ItinoArtifactsToTemp
+        }
+        catch {
+            Write-Host (
+                'WARNING: Restart-waiting state could not be republished. ' +
+                $_.Exception.Message
+            )
+        }
+
+        Stop-ItinoConsoleTranscript
+        Copy-ItinoLogsToScriptLocation
+        Exit-ItinoDeploymentMutex
+        exit 3010
+    }
 
 
     # ========================================================
