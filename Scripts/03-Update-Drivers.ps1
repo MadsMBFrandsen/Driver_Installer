@@ -60,6 +60,16 @@ $ScriptName =
 # ============================================================
 
 # ------------------------------------------------------------
+# Title   : Persistent Lenovo Restart Package Guard
+# Version : 1.5.13
+# Reason  : Persists successfully installed LSUClient packages
+#           that request a restart for the current deployment
+#           session. The same title, version and type are skipped
+#           after the controller verifies a reboot and advances.
+# Date    : 2026-09-04
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
 # Title   : Windows Update Service Recovery Retry
 # Version : 1.5.12
 # Reason  : Retries WU_E_SERVICE_STOP up to three times when no
@@ -221,7 +231,7 @@ $ScriptName =
 
 
 $ScriptVersion =
-    '1.5.12'
+    '1.5.13'
 
 $ScriptUpdated =
     '2026-09-04'
@@ -857,6 +867,12 @@ $RestartFile =
     Join-Path `
         $BasePath `
         'RestartRequired.txt'
+
+
+$LenovoPendingRestartHistoryFile =
+    Join-Path `
+        $BasePath `
+        'LenovoPendingRestartHistory.json'
 
 
 # ============================================================
@@ -8800,6 +8816,231 @@ function Get-LenovoLSUUpdateKey {
 }
 
 
+function Get-LenovoPersistedPendingRestartUpdates {
+
+    $PendingUpdates =
+        @{}
+
+
+    $SessionId =
+        [string]$env:ITINO_DEPLOYMENT_SESSION_ID
+
+
+    $CurrentCycle =
+        0
+
+
+    [void][int]::TryParse(
+        [string]$env:ITINO_DEPLOYMENT_CYCLE,
+        [ref]$CurrentCycle
+    )
+
+
+    if (
+        [string]::IsNullOrWhiteSpace($SessionId) -or
+        $CurrentCycle -le 1 -or
+        -not (
+            Test-Path `
+                -LiteralPath $LenovoPendingRestartHistoryFile
+        )
+    ) {
+
+        return $PendingUpdates
+    }
+
+
+    try {
+
+        $History =
+            Get-Content `
+                -LiteralPath $LenovoPendingRestartHistoryFile `
+                -Raw `
+                -ErrorAction Stop |
+            ConvertFrom-Json `
+                -ErrorAction Stop
+
+
+        if (
+            [string]$History.SessionId -ne
+            $SessionId
+        ) {
+
+            Write-Log -Message (
+                '[REBOOT-PENDING] Ignoring Lenovo restart history from ' +
+                'a different deployment session.'
+            )
+
+
+            return $PendingUpdates
+        }
+
+
+        foreach (
+            $Item in @($History.Items)
+        ) {
+
+            $ItemKey =
+                [string]$Item.Key
+
+
+            $InstalledCycle =
+                0
+
+
+            [void][int]::TryParse(
+                [string]$Item.InstalledCycle,
+                [ref]$InstalledCycle
+            )
+
+
+            if (
+                -not [string]::IsNullOrWhiteSpace($ItemKey) -and
+                $InstalledCycle -gt 0 -and
+                $CurrentCycle -gt $InstalledCycle
+            ) {
+
+                $PendingUpdates[$ItemKey] =
+                    $Item
+            }
+        }
+
+
+        if ($PendingUpdates.Count -gt 0) {
+
+            Write-Log -Message (
+                '[REBOOT-PENDING] Loaded ' +
+                "$($PendingUpdates.Count) Lenovo package record(s) " +
+                'from an earlier verified deployment cycle.'
+            )
+        }
+    }
+    catch {
+
+        Write-Log `
+            -Message (
+                '[REBOOT-PENDING] Unable to read persistent Lenovo ' +
+                "restart history. Error: $($_.Exception.Message)"
+            ) `
+            -Level 'WARNING'
+    }
+
+
+    return $PendingUpdates
+}
+
+
+function Save-LenovoPendingRestartUpdates {
+
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$PendingUpdates
+    )
+
+
+    $SessionId =
+        [string]$env:ITINO_DEPLOYMENT_SESSION_ID
+
+
+    $CurrentCycle =
+        0
+
+
+    [void][int]::TryParse(
+        [string]$env:ITINO_DEPLOYMENT_CYCLE,
+        [ref]$CurrentCycle
+    )
+
+
+    if (
+        [string]::IsNullOrWhiteSpace($SessionId) -or
+        $CurrentCycle -le 0
+    ) {
+
+        Write-Log `
+            -Message (
+                '[REBOOT-PENDING] Deployment session information is not ' +
+                'available. Lenovo restart history will remain in memory only.'
+            ) `
+            -Level 'WARNING'
+
+
+        return
+    }
+
+
+    $TemporaryHistoryFile =
+        "$LenovoPendingRestartHistoryFile.tmp"
+
+
+    try {
+
+        $HistoryItems =
+            @(
+                $PendingUpdates.Values |
+                Sort-Object `
+                    -Property Key |
+                ForEach-Object {
+                    [PSCustomObject]@{
+                        Key = [string]$_.Key
+                        Title = [string]$_.Title
+                        Version = [string]$_.Version
+                        Type = [string]$_.Type
+                        InstalledCycle = [int]$_.InstalledCycle
+                        InstalledTime = [string]$_.InstalledTime
+                    }
+                }
+            )
+
+
+        $History =
+            [PSCustomObject]@{
+                SchemaVersion = 1
+                SessionId = $SessionId
+                ComputerName = $env:COMPUTERNAME
+                LastUpdated = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+                Items = $HistoryItems
+            }
+
+
+        $History |
+            ConvertTo-Json `
+                -Depth 8 |
+            Set-Content `
+                -LiteralPath $TemporaryHistoryFile `
+                -Encoding UTF8 `
+                -Force
+
+
+        Move-Item `
+            -LiteralPath $TemporaryHistoryFile `
+            -Destination $LenovoPendingRestartHistoryFile `
+            -Force
+
+
+        Write-Log -Message (
+            '[REBOOT-PENDING] Saved ' +
+            "$($HistoryItems.Count) Lenovo package record(s) for " +
+            "deployment session $SessionId."
+        )
+    }
+    catch {
+
+        Remove-Item `
+            -LiteralPath $TemporaryHistoryFile `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+
+        Write-Log `
+            -Message (
+                '[REBOOT-PENDING] Unable to save persistent Lenovo ' +
+                "restart history. Error: $($_.Exception.Message)"
+            ) `
+            -Level 'WARNING'
+    }
+}
+
+
 function Test-LenovoLSUResultRequiresRestart {
 
     param(
@@ -8862,11 +9103,22 @@ function Invoke-LenovoLSUClientUpdate {
     }
 
 
-    # Tracks updates that installed successfully during this run
-    # and are waiting for a restart before their final state can
-    # be evaluated correctly by Lenovo.
+    # Tracks updates installed successfully during this deployment
+    # session that still need their post-restart state evaluated.
+    # Records from an earlier cycle are loaded only after the
+    # controller has verified a real reboot and advanced the cycle.
     $InstalledPendingRestart =
-        @{}
+        Get-LenovoPersistedPendingRestartUpdates
+
+
+    $CurrentDeploymentCycle =
+        0
+
+
+    [void][int]::TryParse(
+        [string]$env:ITINO_DEPLOYMENT_CYCLE,
+        [ref]$CurrentDeploymentCycle
+    )
 
 
     for (
@@ -8972,10 +9224,12 @@ function Invoke-LenovoLSUClientUpdate {
 
                 Write-Log -Message (
                     '[REBOOT-PENDING] Skipping LSUClient package already ' +
-                    'installed successfully during this run and still ' +
-                    'reported as applicable before restart. ' +
+                    'installed successfully during this deployment session ' +
+                    'and still reported as applicable. ' +
                     "Title=$($Update.Title); Version=$($Update.Version); " +
-                    "Type=$($Update.Type)"
+                    "Type=$($Update.Type); " +
+                    "InstalledCycle=$($InstalledPendingRestart[$UpdateKey].InstalledCycle); " +
+                    "CurrentCycle=$($env:ITINO_DEPLOYMENT_CYCLE)"
                 )
 
                 continue
@@ -9215,19 +9469,26 @@ function Invoke-LenovoLSUClientUpdate {
                     $InstalledUpdateKey
                 ] =
                     [PSCustomObject]@{
+                        Key = $InstalledUpdateKey
                         Title = [string]$Update.Title
                         Version = [string]$Update.Version
                         Type = [string]$Update.Type
-                        InstalledRound = $Round
+                        InstalledCycle = $CurrentDeploymentCycle
+                        InstalledTime = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
                     }
+
+
+                Save-LenovoPendingRestartUpdates `
+                    -PendingUpdates $InstalledPendingRestart
 
 
                 Write-Log -Message (
                     '[REBOOT-PENDING] Recorded successfully installed ' +
                     'LSUClient package so it will not be installed again ' +
-                    'during this run before restart. ' +
+                    'during this deployment session after restart. ' +
                     "Title=$($Update.Title); Version=$($Update.Version); " +
-                    "Type=$($Update.Type); Round=$Round"
+                    "Type=$($Update.Type); " +
+                    "Cycle=$($env:ITINO_DEPLOYMENT_CYCLE); Round=$Round"
                 )
             }
         }

@@ -63,6 +63,16 @@ $ScriptName =
 # ============================================================
 
 # ------------------------------------------------------------
+# Title   : Reliable Final Verification Selection
+# Version : 1.1.21
+# Reason  : Selects 04-Verify-Drivers.ps1 explicitly and preserves
+#           it as a one-item array in the verification-only cycle.
+#           This prevents a valid single stage from being treated
+#           as a missing selection by Windows PowerShell 5.1.
+# Date    : 2026-09-04
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
 # Title   : Cleanup Policy Simplification
 # Version : 1.1.14
 # Reason  : Removes the duplicate DriverRollback cleanup switch.
@@ -144,7 +154,7 @@ $ScriptName =
 # ------------------------------------------------------------
 
 $ScriptVersion =
-    '1.1.20'
+    '1.1.21'
 
 $ScriptUpdated =
     '2026-09-04'
@@ -3833,30 +3843,47 @@ try {
     # RUN STAGES
     # ========================================================
 
-    $ScriptsToRun =
-        if ($script:FinalVerificationOnly) {
-            @(
-                $Scripts |
-                    Where-Object {
-                        $_.Name -eq 'Verify Drivers'
-                    }
+    if ($script:FinalVerificationOnly) {
+
+        $VerifyStage =
+            $Scripts |
+            Where-Object {
+                $_.File -eq '04-Verify-Drivers.ps1'
+            } |
+            Select-Object -First 1
+
+
+        if ($null -eq $VerifyStage) {
+
+            throw (
+                'The Verify Drivers stage could not be selected ' +
+                'for final verification.'
             )
         }
-        else {
-            @($Scripts)
-        }
 
 
-    if ($script:FinalVerificationOnly) {
+        $ScriptsToRun =
+            @(
+                $VerifyStage
+            )
+
+
         Write-Log -Message (
             'The maximum installation cycle requested a restart. ' +
             'Starting the single final verification-only cycle. OEM tool ' +
             'installation and driver update stages will not run again.'
         ) -Level 'WARNING'
 
-        if ($ScriptsToRun.Count -ne 1) {
-            throw 'The Verify Drivers stage could not be selected for final verification.'
-        }
+        Write-Log -Message (
+            "Selected final verification stage: $($VerifyStage.File)"
+        )
+    }
+    else {
+
+        $ScriptsToRun =
+            @(
+                $Scripts
+            )
     }
 
     $ControllerStartTime =
