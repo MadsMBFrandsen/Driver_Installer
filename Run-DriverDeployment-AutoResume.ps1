@@ -109,6 +109,13 @@ $CopiedLogsFolderName =
     'Logs'
 
 
+# Install.ps1 creates this marker inside the downloaded package. It allows the
+# wrapper to remove only bootstrap-installed files after final success. Git
+# clones, USB copies, and manually extracted packages do not carry the marker.
+$BootstrapCleanupMarkerName =
+    '.universal-driver-installer-install-root'
+
+
 # ============================================================
 # PATHS
 # ============================================================
@@ -542,7 +549,8 @@ function Register-UniversalDriverInstallerResumeTask {
     $Action =
         New-ScheduledTaskAction `
             -Execute $PowerShellExe `
-            -Argument $Arguments
+            -Argument $Arguments `
+            -WorkingDirectory $WrapperDirectory
 
 
     $Trigger =
@@ -651,6 +659,152 @@ function Invoke-UniversalDriverInstallerAutomaticRestart {
         throw (
             "Unable to schedule Windows restart. shutdown.exe exit code: $ShutdownExitCode"
         )
+    }
+}
+
+
+function Start-UniversalDriverInstallerBootstrapCleanup {
+
+    $MarkerPath =
+        Join-Path `
+            $WrapperDirectory `
+            $BootstrapCleanupMarkerName
+
+
+    if (-not (
+        Test-Path `
+            -LiteralPath $MarkerPath `
+            -PathType Leaf
+    )) {
+        return $false
+    }
+
+
+    try {
+
+        $InstallRoot =
+            (
+                Get-Content `
+                    -LiteralPath $MarkerPath `
+                    -Raw `
+                    -ErrorAction Stop
+            ).Trim().TrimStart([char]0xFEFF)
+
+
+        if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
+            throw 'The bootstrap cleanup marker is empty.'
+        }
+
+
+        $InstallRoot =
+            [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
+
+        $FullWrapperDirectory =
+            [IO.Path]::GetFullPath($WrapperDirectory).TrimEnd('\')
+
+
+        if (
+            [IO.Path]::GetFileName($InstallRoot) -ne
+            'UniversalDriverInstaller'
+        ) {
+            throw (
+                'The bootstrap cleanup target has an unexpected directory ' +
+                "name: $InstallRoot"
+            )
+        }
+
+
+        if (-not $FullWrapperDirectory.StartsWith(
+            $InstallRoot + '\',
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw (
+                'The running package is not located inside the requested ' +
+                "cleanup target. Package='$FullWrapperDirectory'; " +
+                "Target='$InstallRoot'."
+            )
+        }
+
+
+        $CleanupLogPath =
+            'C:\Windows\Temp\UniversalDriverInstaller-Cleanup.log'
+
+        $EscapedInstallRoot =
+            $InstallRoot.Replace("'", "''")
+
+        $EscapedCleanupLogPath =
+            $CleanupLogPath.Replace("'", "''")
+
+
+        $CleanupScript = @"
+`$ErrorActionPreference = 'Stop'
+`$Target = '$EscapedInstallRoot'
+`$LogPath = '$EscapedCleanupLogPath'
+for (`$Attempt = 1; `$Attempt -le 12; `$Attempt++) {
+    Start-Sleep -Seconds 5
+    try {
+        if (Test-Path -LiteralPath `$Target) {
+            Remove-Item -LiteralPath `$Target -Recurse -Force -ErrorAction Stop
+        }
+        Add-Content -LiteralPath `$LogPath -Value "`$(Get-Date -Format o) Bootstrap installation removed: `$Target"
+        exit 0
+    }
+    catch {
+        Add-Content -LiteralPath `$LogPath -Value "`$(Get-Date -Format o) Cleanup attempt `$Attempt failed: `$(`$_.Exception.Message)"
+    }
+}
+exit 1
+"@
+
+
+        $EncodedCleanupScript =
+            [Convert]::ToBase64String(
+                [Text.Encoding]::Unicode.GetBytes($CleanupScript)
+            )
+
+
+        Start-Process `
+            -FilePath "$PSHOME\powershell.exe" `
+            -ArgumentList @(
+                '-NoLogo',
+                '-NoProfile',
+                '-ExecutionPolicy',
+                'Bypass',
+                '-WindowStyle',
+                'Hidden',
+                '-EncodedCommand',
+                $EncodedCleanupScript
+            ) `
+            -WindowStyle Hidden `
+            -ErrorAction Stop |
+        Out-Null
+
+
+        Write-Host (
+            "Bootstrap cleanup scheduled for: $InstallRoot"
+        )
+
+        Write-AutoResumeLog -Message (
+            "Bootstrap cleanup scheduled for: $InstallRoot"
+        )
+
+        return $true
+    }
+    catch {
+
+        Write-Host (
+            'WARNING: Unable to schedule bootstrap cleanup. ' +
+            "Reason: $($_.Exception.Message)"
+        )
+
+        Write-AutoResumeLog `
+            -Message (
+                'Unable to schedule bootstrap cleanup. ' +
+                "Reason: $($_.Exception.Message)"
+            ) `
+            -Level WARNING
+
+        return $false
     }
 }
 
@@ -830,6 +984,10 @@ switch ($ControllerExitCode) {
 
         Write-AutoResumeLog -Message (
             'Deployment completed successfully. ExitCode=0. No further resume task required.'
+        )
+
+        [void](
+            Start-UniversalDriverInstallerBootstrapCleanup
         )
 
         exit 0

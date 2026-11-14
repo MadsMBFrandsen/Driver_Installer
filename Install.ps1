@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 
 if ($PSVersionTable.PSVersion.Major -lt 5) {
     throw 'Universal Driver Installer requires Windows PowerShell 5.1 or later.'
@@ -26,6 +26,11 @@ $LauncherPath =
     Join-Path `
         $ApplicationRoot `
         'Run-DriverDeployment-AutoResume.bat'
+
+$CleanupMarkerPath =
+    Join-Path `
+        $ApplicationRoot `
+        '.universal-driver-installer-install-root'
 
 try {
 
@@ -56,6 +61,14 @@ try {
     )) {
         throw "The launcher was not found after extraction: $LauncherPath"
     }
+
+    # The auto-resume wrapper only removes installations carrying this marker.
+    # A normal Git clone, USB copy, or manually extracted package is preserved.
+    Set-Content `
+        -LiteralPath $CleanupMarkerPath `
+        -Value $InstallRoot `
+        -Encoding UTF8 `
+        -Force
 
     Write-Host 'Starting Universal Driver Installer...'
 

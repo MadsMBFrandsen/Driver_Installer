@@ -37,6 +37,8 @@ The command:
    rights through Windows UAC.
 5. Creates a temporary scheduled task only when the deployment must continue
    after a restart.
+6. Removes the downloaded bootstrap installation after the deployment finishes
+   successfully.
 
 Review [`Install.ps1`](Install.ps1) before running the command if you want to
 inspect exactly what it downloads and executes.
@@ -47,16 +49,21 @@ The project is installed in:
 %LOCALAPPDATA%\UniversalDriverInstaller\Driver_Installer-main
 ```
 
-## Start the application again
+## Start an incomplete or failed deployment again
 
-After the project has been downloaded, it can be started again with:
+While the downloaded package is still present, it can be started again with:
 
 ```cmd
 call "%LOCALAPPDATA%\UniversalDriverInstaller\Driver_Installer-main\Run-DriverDeployment-AutoResume.bat"
 ```
 
-Run the quick-start command again to download the latest version and overwrite
-the local project files.
+After a successful deployment, the bootstrap installation is removed
+automatically. Run the quick-start command again whenever you want to download
+and start the latest version.
+
+After a required restart, the scheduled task runs as `SYSTEM` in the
+background. No console window is displayed. By default, the resumed deployment
+starts 60 seconds after Windows startup.
 
 ## Deployment process
 
@@ -77,6 +84,18 @@ deployment, working data and failure reports may also be available under:
 
 ```text
 C:\ProgramData\UniversalDriverInstaller
+```
+
+Logs published before final cleanup remain available under:
+
+```text
+C:\Windows\Temp\UniversalDriverInstaller-Deployment\Driver
+```
+
+Bootstrap cleanup activity is recorded in:
+
+```text
+C:\Windows\Temp\UniversalDriverInstaller-Cleanup.log
 ```
 
 Working data may be removed automatically after a successful deployment. On a
