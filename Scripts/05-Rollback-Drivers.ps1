@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    ITINO manual driver rollback utility with post-rollback verification.
+    Universal Driver Installer manual driver rollback utility with post-rollback verification.
 
 .DESCRIPTION
     Uses the before/after driver snapshots created by Phase 5
@@ -56,7 +56,7 @@ $ErrorActionPreference =
 
 
 $BasePath =
-    'C:\ProgramData\Itino\DriverDeployment'
+    'C:\ProgramData\UniversalDriverInstaller\DriverDeployment'
 
 
 $BeforeSnapshotFile =
@@ -72,7 +72,7 @@ $AfterSnapshotFile =
 
 
 $RollbackRoot =
-    'C:\ProgramData\Itino\DriverRollback'
+    'C:\ProgramData\UniversalDriverInstaller\DriverRollback'
 
 
 $LatestPointerFile =
@@ -1174,7 +1174,7 @@ function Invoke-DriverRollback {
 
 Write-Host ''
 Write-Host '============================================================'
-Write-Host 'ITINO DRIVER ROLLBACK - PHASE 10.12'
+Write-Host 'UNIVERSAL DRIVER INSTALLER - DRIVER ROLLBACK - PHASE 10.12'
 Write-Host '============================================================'
 Write-Host ''
 

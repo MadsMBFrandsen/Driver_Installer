@@ -3,7 +3,7 @@
     Updates device drivers.
 
 .DESCRIPTION
-    Stage 3 of the ITINO Driver Check And Update workflow.
+    Stage 3 of the Universal Driver Installer workflow.
 
     Dell:
         Dell Command Update
@@ -48,7 +48,7 @@
 param()
 
 # ============================================================
-# ITINO DRIVER UPDATE SCRIPT
+# Universal Driver Installer DRIVER UPDATE SCRIPT
 # ============================================================
 
 $ScriptName =
@@ -312,29 +312,29 @@ $script:StopDriverStageForRestart =
     $false
 
 
-function Get-ItinoProjectMetadata {
+function Get-UniversalDriverInstallerProjectMetadata {
 
     $ProjectName =
-        [string]$env:ITINO_DRIVER_DEPLOYMENT_NAME
+        [string]$env:UNIVERSAL_DRIVER_INSTALLER_DRIVER_DEPLOYMENT_NAME
 
     $ProjectVersion =
-        [string]$env:ITINO_DRIVER_DEPLOYMENT_VERSION
+        [string]$env:UNIVERSAL_DRIVER_INSTALLER_DRIVER_DEPLOYMENT_VERSION
 
     $ProjectPhase =
-        [string]$env:ITINO_DRIVER_DEPLOYMENT_PHASE
+        [string]$env:UNIVERSAL_DRIVER_INSTALLER_DRIVER_DEPLOYMENT_PHASE
 
     $ReleaseChannel =
-        [string]$env:ITINO_DRIVER_DEPLOYMENT_RELEASE_CHANNEL
+        [string]$env:UNIVERSAL_DRIVER_INSTALLER_DRIVER_DEPLOYMENT_RELEASE_CHANNEL
 
     $BuildDate =
-        [string]$env:ITINO_DRIVER_DEPLOYMENT_BUILD_DATE
+        [string]$env:UNIVERSAL_DRIVER_INSTALLER_DRIVER_DEPLOYMENT_BUILD_DATE
 
     $ControllerVersion =
-        [string]$env:ITINO_CONTROLLER_VERSION
+        [string]$env:UNIVERSAL_DRIVER_INSTALLER_CONTROLLER_VERSION
 
 
     if ([string]::IsNullOrWhiteSpace($ProjectName)) {
-        $ProjectName = 'ITINO Driver Deployment'
+        $ProjectName = 'Universal Driver Installer'
     }
 
     if ([string]::IsNullOrWhiteSpace($ProjectVersion)) {
@@ -373,19 +373,19 @@ function Get-ItinoProjectMetadata {
         UpdateDriversVersion = $ScriptVersion
 
         GitTag =
-            if ([string]::IsNullOrWhiteSpace([string]$env:ITINO_GIT_TAG)) {
+            if ([string]::IsNullOrWhiteSpace([string]$env:UNIVERSAL_DRIVER_INSTALLER_GIT_TAG)) {
                 $null
             }
             else {
-                [string]$env:ITINO_GIT_TAG
+                [string]$env:UNIVERSAL_DRIVER_INSTALLER_GIT_TAG
             }
 
         GitCommit =
-            if ([string]::IsNullOrWhiteSpace([string]$env:ITINO_GIT_COMMIT)) {
+            if ([string]::IsNullOrWhiteSpace([string]$env:UNIVERSAL_DRIVER_INSTALLER_GIT_COMMIT)) {
                 $null
             }
             else {
-                [string]$env:ITINO_GIT_COMMIT
+                [string]$env:UNIVERSAL_DRIVER_INSTALLER_GIT_COMMIT
             }
     }
 }
@@ -566,29 +566,29 @@ function New-WindowsUpdateSummaryObject {
 # PHASE 10.9 - SHARED COMMON HELPERS
 # ============================================================
 
-$ItinoCommonHelperPath =
+$UniversalDriverInstallerCommonHelperPath =
     Join-Path `
         $PSScriptRoot `
-        'Common\Itino-DriverCommon.ps1'
+        'Common\UniversalDriverInstaller-DriverCommon.ps1'
 
 
 if (-not (
     Test-Path `
-        -LiteralPath $ItinoCommonHelperPath `
+        -LiteralPath $UniversalDriverInstallerCommonHelperPath `
         -PathType Leaf
 )) {
 
     throw (
-        'Required ITINO shared helper file was not found: ' +
-        $ItinoCommonHelperPath
+        'Required Universal Driver Installer shared helper file was not found: ' +
+        $UniversalDriverInstallerCommonHelperPath
     )
 }
 
 
-. $ItinoCommonHelperPath
+. $UniversalDriverInstallerCommonHelperPath
 
 
-function Get-ItinoIntegerOption {
+function Get-UniversalDriverInstallerIntegerOption {
 
     param(
         [Parameter(Mandatory)]
@@ -630,7 +630,7 @@ function Get-ItinoIntegerOption {
 }
 
 
-function Get-ItinoStringOption {
+function Get-UniversalDriverInstallerStringOption {
 
     param(
         [Parameter(Mandatory)]
@@ -657,7 +657,7 @@ function Get-ItinoStringOption {
 }
 
 
-function Get-ItinoListOption {
+function Get-UniversalDriverInstallerListOption {
 
     param(
         [Parameter(Mandatory)]
@@ -706,26 +706,26 @@ function Get-ItinoListOption {
 # ============================================================
 
 $WriteLogFiles =
-    Get-ItinoBooleanOption `
-        -EnvironmentVariable 'ITINO_WRITE_LOG_FILES' `
+    Get-UniversalDriverInstallerBooleanOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_WRITE_LOG_FILES' `
         -DefaultValue $true
 
 
 $UnattendedMode =
-    Get-ItinoBooleanOption `
-        -EnvironmentVariable 'ITINO_UNATTENDED_MODE' `
+    Get-UniversalDriverInstallerBooleanOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_UNATTENDED_MODE' `
         -DefaultValue $true
 
 
 $CloseLenovoHotkeyPopup =
-    Get-ItinoBooleanOption `
-        -EnvironmentVariable 'ITINO_CLOSE_LENOVO_HOTKEY_POPUP' `
+    Get-UniversalDriverInstallerBooleanOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_CLOSE_LENOVO_HOTKEY_POPUP' `
         -DefaultValue $true
 
 
 $RequireAdministrator =
-    Get-ItinoBooleanOption `
-        -EnvironmentVariable 'ITINO_REQUIRE_ADMINISTRATOR' `
+    Get-UniversalDriverInstallerBooleanOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_REQUIRE_ADMINISTRATOR' `
         -DefaultValue $true
 
 # ============================================================
@@ -776,27 +776,27 @@ $OEMProcessTimeoutSeconds =
 
 
 $LenovoLSUClientModuleName =
-    Get-ItinoStringOption `
-        -EnvironmentVariable 'ITINO_LENOVO_LSUCLIENT_MODULE_NAME' `
+    Get-UniversalDriverInstallerStringOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_LENOVO_LSUCLIENT_MODULE_NAME' `
         -DefaultValue 'LSUClient'
 
 
 $LenovoLSUClientRepository =
-    Get-ItinoStringOption `
-        -EnvironmentVariable 'ITINO_LENOVO_LSUCLIENT_REPOSITORY' `
+    Get-UniversalDriverInstallerStringOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_LENOVO_LSUCLIENT_REPOSITORY' `
         -DefaultValue 'PSGallery'
 
 
 $MaximumLenovoLSURounds =
-    Get-ItinoIntegerOption `
-        -EnvironmentVariable 'ITINO_LENOVO_LSUCLIENT_MAXIMUM_ROUNDS' `
+    Get-UniversalDriverInstallerIntegerOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_LENOVO_LSUCLIENT_MAXIMUM_ROUNDS' `
         -DefaultValue 3 `
         -MinimumValue 1
 
 
 $LenovoLSUUpdateTypes =
-    Get-ItinoListOption `
-        -EnvironmentVariable 'ITINO_LENOVO_LSUCLIENT_UPDATE_TYPES' `
+    Get-UniversalDriverInstallerListOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_LENOVO_LSUCLIENT_UPDATE_TYPES' `
         -DefaultValue @(
             'Driver'
             'BIOS'
@@ -805,8 +805,8 @@ $LenovoLSUUpdateTypes =
 
 
 $LenovoLSUSeverities =
-    Get-ItinoListOption `
-        -EnvironmentVariable 'ITINO_LENOVO_LSUCLIENT_SEVERITIES' `
+    Get-UniversalDriverInstallerListOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_LENOVO_LSUCLIENT_SEVERITIES' `
         -DefaultValue @(
             'Critical'
             'Recommended'
@@ -814,8 +814,8 @@ $LenovoLSUSeverities =
 
 
 $AllowFirmwareUpdates =
-    Get-ItinoBooleanOption `
-        -EnvironmentVariable 'ITINO_ALLOW_FIRMWARE_UPDATES' `
+    Get-UniversalDriverInstallerBooleanOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_ALLOW_FIRMWARE_UPDATES' `
         -DefaultValue $false
 
 
@@ -824,7 +824,7 @@ $AllowFirmwareUpdates =
 # ============================================================
 
 $BasePath =
-    'C:\ProgramData\Itino\DriverDeployment'
+    'C:\ProgramData\UniversalDriverInstaller\DriverDeployment'
 
 
 $LogPath =
@@ -1831,7 +1831,7 @@ function Request-WindowsUpdateScan {
     )
 
 
-    Invoke-ItinoCountdown `
+    Invoke-UniversalDriverInstallerCountdown `
         -Seconds $WindowsUpdateScanWaitSeconds `
         -Message 'Windows Update scan refresh countdown.'
 }
@@ -1841,7 +1841,7 @@ function Request-WindowsUpdateScan {
 # WINDOWS UPDATE FIRMWARE CLASSIFICATION
 # ============================================================
 
-function Test-ItinoWindowsUpdateFirmware {
+function Test-UniversalDriverInstallerWindowsUpdateFirmware {
 
     param(
         [Parameter(Mandatory)]
@@ -1902,7 +1902,7 @@ function Test-ItinoWindowsUpdateFirmware {
 }
 
 
-function Test-ItinoWindowsUpdateAllowed {
+function Test-UniversalDriverInstallerWindowsUpdateAllowed {
 
     param(
         [Parameter(Mandatory)]
@@ -1916,7 +1916,7 @@ function Test-ItinoWindowsUpdateAllowed {
 
 
     return -not (
-        Test-ItinoWindowsUpdateFirmware `
+        Test-UniversalDriverInstallerWindowsUpdateFirmware `
             -Update $Update
     )
 }
@@ -1954,7 +1954,7 @@ function Get-PendingWindowsUpdateDriverCount {
 
 
         $UpdateSession.ClientApplicationID =
-            'ITINO Driver Deployment'
+            'Universal Driver Installer'
 
 
         $UpdateSearcher =
@@ -1989,7 +1989,7 @@ function Get-PendingWindowsUpdateDriverCount {
 
 
             if (
-                Test-ItinoWindowsUpdateAllowed `
+                Test-UniversalDriverInstallerWindowsUpdateAllowed `
                     -Update $PendingUpdate
             ) {
 
@@ -2038,7 +2038,7 @@ function Get-PendingWindowsUpdateDriverCount {
 # COUNTDOWN
 # ============================================================
 
-function Invoke-ItinoCountdown {
+function Invoke-UniversalDriverInstallerCountdown {
 
     param(
         [Parameter(Mandatory)]
@@ -2076,10 +2076,10 @@ function Invoke-ItinoCountdown {
 # NATIVE CONSOLE HEARTBEAT
 # ============================================================
 
-function Initialize-ItinoNativeConsoleHeartbeat {
+function Initialize-UniversalDriverInstallerNativeConsoleHeartbeat {
 
     if (
-        'ItinoConsoleHeartbeat' -as [type]
+        'UniversalDriverInstallerConsoleHeartbeat' -as [type]
     ) {
         return
     }
@@ -2089,13 +2089,13 @@ function Initialize-ItinoNativeConsoleHeartbeat {
 using System;
 using System.Threading;
 
-public sealed class ItinoConsoleHeartbeat : IDisposable
+public sealed class UniversalDriverInstallerConsoleHeartbeat : IDisposable
 {
     private readonly string _message;
     private readonly Timer _timer;
     private readonly DateTime _started;
 
-    public ItinoConsoleHeartbeat(string message, int intervalSeconds)
+    public UniversalDriverInstallerConsoleHeartbeat(string message, int intervalSeconds)
     {
         _message = message;
         _started = DateTime.Now;
@@ -2152,7 +2152,7 @@ public sealed class ItinoConsoleHeartbeat : IDisposable
 }
 
 
-function Start-ItinoNativeConsoleHeartbeat {
+function Start-UniversalDriverInstallerNativeConsoleHeartbeat {
 
     param(
         [Parameter(Mandatory)]
@@ -2161,10 +2161,10 @@ function Start-ItinoNativeConsoleHeartbeat {
         [int]$IntervalSeconds = 15
     )
 
-    Initialize-ItinoNativeConsoleHeartbeat
+    Initialize-UniversalDriverInstallerNativeConsoleHeartbeat
 
     return New-Object `
-        -TypeName ItinoConsoleHeartbeat `
+        -TypeName UniversalDriverInstallerConsoleHeartbeat `
         -ArgumentList @(
             $Message,
             $IntervalSeconds
@@ -2172,7 +2172,7 @@ function Start-ItinoNativeConsoleHeartbeat {
 }
 
 
-function Stop-ItinoNativeConsoleHeartbeat {
+function Stop-UniversalDriverInstallerNativeConsoleHeartbeat {
 
     param(
         $Heartbeat
@@ -2191,10 +2191,10 @@ function Stop-ItinoNativeConsoleHeartbeat {
 
 
 
-function Initialize-ItinoDownloadActivityMonitor {
+function Initialize-UniversalDriverInstallerDownloadActivityMonitor {
 
     if (
-        'ItinoDownloadActivityMonitor' -as [type]
+        'UniversalDriverInstallerDownloadActivityMonitor' -as [type]
     ) {
 
         return
@@ -2207,7 +2207,7 @@ using System;
 using System.IO;
 using System.Threading;
 
-public sealed class ItinoDownloadActivityMonitor : IDisposable
+public sealed class UniversalDriverInstallerDownloadActivityMonitor : IDisposable
 {
     private readonly Timer _timer;
     private readonly string[] _paths;
@@ -2215,7 +2215,7 @@ public sealed class ItinoDownloadActivityMonitor : IDisposable
     private long _previousBytes;
     private readonly DateTime _started;
 
-    public ItinoDownloadActivityMonitor(
+    public UniversalDriverInstallerDownloadActivityMonitor(
         string message,
         string[] paths,
         int intervalSeconds)
@@ -2359,7 +2359,7 @@ public sealed class ItinoDownloadActivityMonitor : IDisposable
 }
 
 
-function Start-ItinoDownloadActivityMonitor {
+function Start-UniversalDriverInstallerDownloadActivityMonitor {
 
     param(
         [Parameter(Mandatory)]
@@ -2369,7 +2369,7 @@ function Start-ItinoDownloadActivityMonitor {
     )
 
 
-    Initialize-ItinoDownloadActivityMonitor
+    Initialize-UniversalDriverInstallerDownloadActivityMonitor
 
 
     $ActivityPaths =
@@ -2380,7 +2380,7 @@ function Start-ItinoDownloadActivityMonitor {
 
 
     return New-Object `
-        -TypeName ItinoDownloadActivityMonitor `
+        -TypeName UniversalDriverInstallerDownloadActivityMonitor `
         -ArgumentList @(
             $Message,
             [string[]]$ActivityPaths,
@@ -2389,7 +2389,7 @@ function Start-ItinoDownloadActivityMonitor {
 }
 
 
-function Stop-ItinoDownloadActivityMonitor {
+function Stop-UniversalDriverInstallerDownloadActivityMonitor {
 
     param(
         $Monitor
@@ -2516,7 +2516,7 @@ function Restore-WindowsUpdateServiceAvailability {
     Request-WindowsUpdateScan
 
 
-    Invoke-ItinoCountdown `
+    Invoke-UniversalDriverInstallerCountdown `
         -Seconds $WaitSeconds `
         -Message 'Waiting before the Windows Update search retry.'
 }
@@ -2675,7 +2675,7 @@ function Invoke-WindowsUpdateDriverUpdate {
 
 
                 $UpdateSession.ClientApplicationID =
-                    'ITINO Driver Deployment'
+                    'Universal Driver Installer'
 
 
                 $UpdateSearcher =
@@ -2713,7 +2713,7 @@ function Invoke-WindowsUpdateDriverUpdate {
 
 
                     $SearchHeartbeat =
-                        Start-ItinoNativeConsoleHeartbeat `
+                        Start-UniversalDriverInstallerNativeConsoleHeartbeat `
                             -Message (
                                 "$PhaseName pass ${Pass}: Windows Update is still searching for applicable drivers..."
                             ) `
@@ -2826,7 +2826,7 @@ function Invoke-WindowsUpdateDriverUpdate {
 
 
                         $UpdateSession.ClientApplicationID =
-                            'ITINO Driver Deployment'
+                            'Universal Driver Installer'
 
 
                         $UpdateSearcher =
@@ -2837,7 +2837,7 @@ function Invoke-WindowsUpdateDriverUpdate {
                         $SearchStopwatch.Stop()
 
 
-                        Stop-ItinoNativeConsoleHeartbeat `
+                        Stop-UniversalDriverInstallerNativeConsoleHeartbeat `
                             -Heartbeat $SearchHeartbeat
 
 
@@ -2938,7 +2938,7 @@ function Invoke-WindowsUpdateDriverUpdate {
 
                     if (
                         -not (
-                            Test-ItinoWindowsUpdateAllowed `
+                            Test-UniversalDriverInstallerWindowsUpdateAllowed `
                                 -Update $Update
                         )
                     ) {
@@ -3080,7 +3080,7 @@ function Invoke-WindowsUpdateDriverUpdate {
 
 
                     $DownloadHeartbeat =
-                        Start-ItinoNativeConsoleHeartbeat `
+                        Start-UniversalDriverInstallerNativeConsoleHeartbeat `
                             -Message (
                                 "$PhaseName pass ${Pass}: Windows Update is still downloading " +
                                 "$($UpdatesToDownload.Count) driver update(s) as one batch..."
@@ -3089,7 +3089,7 @@ function Invoke-WindowsUpdateDriverUpdate {
 
 
                     $DownloadActivityMonitor =
-                        Start-ItinoDownloadActivityMonitor `
+                        Start-UniversalDriverInstallerDownloadActivityMonitor `
                             -Message (
                                 "$PhaseName pass ${Pass}: Windows Update download cache activity."
                             ) `
@@ -3106,11 +3106,11 @@ function Invoke-WindowsUpdateDriverUpdate {
                         $DownloadStopwatch.Stop()
 
 
-                        Stop-ItinoDownloadActivityMonitor `
+                        Stop-UniversalDriverInstallerDownloadActivityMonitor `
                             -Monitor $DownloadActivityMonitor
 
 
-                        Stop-ItinoNativeConsoleHeartbeat `
+                        Stop-UniversalDriverInstallerNativeConsoleHeartbeat `
                             -Heartbeat $DownloadHeartbeat
 
 
@@ -3295,7 +3295,7 @@ function Invoke-WindowsUpdateDriverUpdate {
 
 
                 $InstallHeartbeat =
-                    Start-ItinoNativeConsoleHeartbeat `
+                    Start-UniversalDriverInstallerNativeConsoleHeartbeat `
                         -Message (
                             "$PhaseName pass ${Pass}: Windows Update is still installing " +
                             "$($UpdatesToInstall.Count) driver update(s) as one batch..."
@@ -3319,7 +3319,7 @@ function Invoke-WindowsUpdateDriverUpdate {
                     $InstallStopwatch.Stop()
 
 
-                    Stop-ItinoNativeConsoleHeartbeat `
+                    Stop-UniversalDriverInstallerNativeConsoleHeartbeat `
                         -Heartbeat $InstallHeartbeat
 
 
@@ -3569,7 +3569,7 @@ function Invoke-WindowsUpdateDriverUpdate {
             )
 
 
-            Invoke-ItinoCountdown `
+            Invoke-UniversalDriverInstallerCountdown `
                 -Seconds $PassDelaySeconds `
                 -Message "$PhaseName countdown before pass $($Pass + 1)."
         }
@@ -4743,7 +4743,7 @@ function Write-DellUpdateResult {
 
 
                 Project =
-                    Get-ItinoProjectMetadata
+                    Get-UniversalDriverInstallerProjectMetadata
 
                 DeploymentCycle =
                     $DeploymentCycle
@@ -4922,7 +4922,7 @@ function Invoke-DellDriverUpdate {
 
     if (
         [int]::TryParse(
-            [string]$env:ITINO_DEPLOYMENT_CYCLE,
+            [string]$env:UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_CYCLE,
             [ref]$DeploymentCycle
         ) -and
         $DeploymentCycle -gt 0
@@ -5065,7 +5065,7 @@ function Invoke-DellDriverUpdate {
     #   - Correctly treat scan code 500 as "no updates".
     #   - Correctly treat code 6 as "another DCU instance".
     #   - Retry transient scan/apply/service-busy failures.
-    #   - Translate restart-required results into ITINO 3010
+    #   - Translate restart-required results into Universal Driver Installer 3010
     #     restart-marker behavior.
     # ========================================================
 
@@ -6639,7 +6639,7 @@ function Write-HPUpdateResult {
 
 
                 Project =
-                    Get-ItinoProjectMetadata
+                    Get-UniversalDriverInstallerProjectMetadata
 
                 Tool =
                     'HP Image Assistant'
@@ -6889,7 +6889,7 @@ function Invoke-HPDriverUpdate {
     # ========================================================
     #
     # The controller exposes the current deployment cycle through
-    # ITINO_DEPLOYMENT_CYCLE. Each HPIA cycle receives a fresh
+    # UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_CYCLE. Each HPIA cycle receives a fresh
     # Reports and Downloads tree so Cycle 2 cannot count files
     # created by Cycle 1.
     #
@@ -6907,7 +6907,7 @@ function Invoke-HPDriverUpdate {
 
     if (
         [int]::TryParse(
-            [string]$env:ITINO_DEPLOYMENT_CYCLE,
+            [string]$env:UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_CYCLE,
             [ref]$DeploymentCycle
         ) -and
         $DeploymentCycle -gt 0
@@ -7318,7 +7318,7 @@ function Invoke-HPDriverUpdate {
 # LENOVO PROCESS / WEB HELPERS
 # ============================================================
 
-function Get-ItinoExceptionResponseUrl {
+function Get-UniversalDriverInstallerExceptionResponseUrl {
 
     param(
         [Parameter(Mandatory)]
@@ -7937,7 +7937,7 @@ function New-LenovoMirroredFilteredRepository {
         catch {
 
             $FailedUrl =
-                Get-ItinoExceptionResponseUrl `
+                Get-UniversalDriverInstallerExceptionResponseUrl `
                     -Exception $_.Exception
 
 
@@ -8443,7 +8443,7 @@ function Invoke-LSUClientCatalogScanWithFallback {
         catch {
 
             $CachedFailedUrl =
-                Get-ItinoExceptionResponseUrl `
+                Get-UniversalDriverInstallerExceptionResponseUrl `
                     -Exception $_.Exception
 
 
@@ -8491,7 +8491,7 @@ function Invoke-LSUClientCatalogScanWithFallback {
 
 
         $OriginalFailedUrl =
-            Get-ItinoExceptionResponseUrl `
+            Get-UniversalDriverInstallerExceptionResponseUrl `
                 -Exception $_.Exception
 
 
@@ -8654,7 +8654,7 @@ function Invoke-LSUClientCatalogScanWithFallback {
     catch {
 
         $RetryFailedUrl =
-            Get-ItinoExceptionResponseUrl `
+            Get-UniversalDriverInstallerExceptionResponseUrl `
                 -Exception $_.Exception
 
 
@@ -8823,7 +8823,7 @@ function Get-LenovoPersistedPendingRestartUpdates {
 
 
     $SessionId =
-        [string]$env:ITINO_DEPLOYMENT_SESSION_ID
+        [string]$env:UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_SESSION_ID
 
 
     $CurrentCycle =
@@ -8831,7 +8831,7 @@ function Get-LenovoPersistedPendingRestartUpdates {
 
 
     [void][int]::TryParse(
-        [string]$env:ITINO_DEPLOYMENT_CYCLE,
+        [string]$env:UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_CYCLE,
         [ref]$CurrentCycle
     )
 
@@ -8938,7 +8938,7 @@ function Save-LenovoPendingRestartUpdates {
 
 
     $SessionId =
-        [string]$env:ITINO_DEPLOYMENT_SESSION_ID
+        [string]$env:UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_SESSION_ID
 
 
     $CurrentCycle =
@@ -8946,7 +8946,7 @@ function Save-LenovoPendingRestartUpdates {
 
 
     [void][int]::TryParse(
-        [string]$env:ITINO_DEPLOYMENT_CYCLE,
+        [string]$env:UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_CYCLE,
         [ref]$CurrentCycle
     )
 
@@ -9116,7 +9116,7 @@ function Invoke-LenovoLSUClientUpdate {
 
 
     [void][int]::TryParse(
-        [string]$env:ITINO_DEPLOYMENT_CYCLE,
+        [string]$env:UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_CYCLE,
         [ref]$CurrentDeploymentCycle
     )
 
@@ -9229,7 +9229,7 @@ function Invoke-LenovoLSUClientUpdate {
                     "Title=$($Update.Title); Version=$($Update.Version); " +
                     "Type=$($Update.Type); " +
                     "InstalledCycle=$($InstalledPendingRestart[$UpdateKey].InstalledCycle); " +
-                    "CurrentCycle=$($env:ITINO_DEPLOYMENT_CYCLE)"
+                    "CurrentCycle=$($env:UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_CYCLE)"
                 )
 
                 continue
@@ -9488,7 +9488,7 @@ function Invoke-LenovoLSUClientUpdate {
                     'during this deployment session after restart. ' +
                     "Title=$($Update.Title); Version=$($Update.Version); " +
                     "Type=$($Update.Type); " +
-                    "Cycle=$($env:ITINO_DEPLOYMENT_CYCLE); Round=$Round"
+                    "Cycle=$($env:UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_CYCLE); Round=$Round"
                 )
             }
         }
@@ -9606,7 +9606,7 @@ function Write-LenovoUpdateResult {
 
 
                 Project =
-                    Get-ItinoProjectMetadata
+                    Get-UniversalDriverInstallerProjectMetadata
 
                 PrimaryEngine =
                     'LSUClient'
@@ -10284,7 +10284,7 @@ function Write-OEMUpdateResult {
 
 
                 Project =
-                    Get-ItinoProjectMetadata
+                    Get-UniversalDriverInstallerProjectMetadata
 
                 ComputerName =
                     $env:COMPUTERNAME
@@ -10335,7 +10335,7 @@ function Write-OEMUpdateResult {
                         PowerShell51ExitCodeFinalization = $true
                         CommonOEMSequence = 'Invoke-OEMDriverSequence'
                         CommonOEMSequenceVersion = 1
-                        SharedCommonHelpers = 'Common\Itino-DriverCommon.ps1'
+                        SharedCommonHelpers = 'Common\UniversalDriverInstaller-DriverCommon.ps1'
                         SharedCommonHelpersVersion = 1
                     }
 
@@ -10359,7 +10359,7 @@ function Write-OEMUpdateResult {
 
         Write-Log -Message (
             'OEM UPDATE RESULT: ' +
-            "ProjectVersion=$((Get-ItinoProjectMetadata).Version) | " +
+            "ProjectVersion=$((Get-UniversalDriverInstallerProjectMetadata).Version) | " +
             "Manufacturer=$Manufacturer | " +
             "Tool=$ToolName | " +
             "Version=$ToolVersion | " +
@@ -10434,7 +10434,7 @@ try {
 
 
     $ProjectMetadata =
-        Get-ItinoProjectMetadata
+        Get-UniversalDriverInstallerProjectMetadata
 
 
     Write-Log -Message (

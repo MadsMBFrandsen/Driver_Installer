@@ -31,14 +31,14 @@ echo.
 
 echo Checking if HardwareInformation.json exists...
 
-if not exist "C:\ProgramData\Itino\DriverDeployment\HardwareInformation.json" (
+if not exist "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\HardwareInformation.json" (
     echo.
     echo [ERROR] HardwareInformation.json was not found.
     echo.
     echo Script 01 must be run successfully first.
     echo.
     echo Expected file:
-    echo C:\ProgramData\Itino\DriverDeployment\HardwareInformation.json
+    echo C:\ProgramData\UniversalDriverInstaller\DriverDeployment\HardwareInformation.json
     echo.
     pause
     exit /b 1
@@ -78,17 +78,17 @@ if "%EXITCODE%"=="0" (
 echo.
 echo ------------------------------------------------------------
 echo Log file:
-echo C:\ProgramData\Itino\DriverDeployment\Logs\Install-OEM-Update-Tool.log
+echo C:\ProgramData\UniversalDriverInstaller\DriverDeployment\Logs\Install-OEM-Update-Tool.log
 echo ------------------------------------------------------------
 echo.
 
-if exist "C:\ProgramData\Itino\DriverDeployment\Logs\Install-OEM-Update-Tool.log" (
+if exist "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\Logs\Install-OEM-Update-Tool.log" (
 
     echo Last log entries:
     echo.
     
     powershell.exe -NoLogo -NoProfile -Command ^
-        "Get-Content 'C:\ProgramData\Itino\DriverDeployment\Logs\Install-OEM-Update-Tool.log' -Tail 20"
+        "Get-Content 'C:\ProgramData\UniversalDriverInstaller\DriverDeployment\Logs\Install-OEM-Update-Tool.log' -Tail 20"
 
 ) else (
 

@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    Runs the complete ITINO Driver Check And Update workflow.
+    Runs the complete Universal Driver Installer workflow.
 
 .DESCRIPTION
     Runs the following scripts in order:
@@ -51,7 +51,7 @@ param()
 
 
 # ============================================================
-# ITINO DRIVER DEPLOYMENT CONTROLLER
+# UNIVERSAL DRIVER INSTALLER CONTROLLER
 # ============================================================
 
 $ScriptName =
@@ -77,7 +77,7 @@ $ScriptName =
 # Version : 1.1.14
 # Reason  : Removes the duplicate DriverRollback cleanup switch.
 #           CleanupAfterDeployment is now the only setting that
-#           controls final successful ITINO root deletion.
+#           controls final successful Universal Driver Installer root deletion.
 # Date    : 2026-08-31
 # ------------------------------------------------------------
 
@@ -94,9 +94,9 @@ $ScriptName =
 # ------------------------------------------------------------
 # Title   : Single Cleanup Switch
 # Version : 1.1.7
-# Reason  : Removes DeleteEntireItinoRootOnCleanSuccess and uses
+# Reason  : Removes DeleteEntireUniversalDriverInstallerRootOnCleanSuccess and uses
 #           CleanupAfterDeployment as the single master switch
-#           for complete ITINO-root deletion on final success.
+#           for complete UniversalDriverInstaller-root deletion on final success.
 # Date    : 2026-08-26
 # ------------------------------------------------------------
 
@@ -148,7 +148,7 @@ $ScriptName =
 # Reason  : Adds restart-cycle state, original rollback-baseline
 #           preservation, maximum cycle protection, single-
 #           instance protection, firmware power-safety gating,
-#           failure artifact preservation and complete ITINO
+#           failure artifact preservation and complete Universal Driver Installer
 #           cleanup after final clean success.
 # Date    : 2026-08-25
 # ------------------------------------------------------------
@@ -165,7 +165,7 @@ $ScriptUpdated =
 # ============================================================
 
 $DriverDeploymentName =
-    'ITINO Driver Deployment'
+    'Universal Driver Installer'
 
 $DriverDeploymentVersion =
     '1.0.0-rc1'
@@ -182,28 +182,28 @@ $DriverDeploymentBuildDate =
 
 # Optional GitHub/build-pipeline values.
 $DriverDeploymentGitTag =
-    [string]$env:ITINO_GIT_TAG
+    [string]$env:UNIVERSAL_DRIVER_INSTALLER_GIT_TAG
 
 $DriverDeploymentGitCommit =
-    [string]$env:ITINO_GIT_COMMIT
+    [string]$env:UNIVERSAL_DRIVER_INSTALLER_GIT_COMMIT
 
 
-$env:ITINO_DRIVER_DEPLOYMENT_NAME =
+$env:UNIVERSAL_DRIVER_INSTALLER_DRIVER_DEPLOYMENT_NAME =
     $DriverDeploymentName
 
-$env:ITINO_DRIVER_DEPLOYMENT_VERSION =
+$env:UNIVERSAL_DRIVER_INSTALLER_DRIVER_DEPLOYMENT_VERSION =
     $DriverDeploymentVersion
 
-$env:ITINO_DRIVER_DEPLOYMENT_PHASE =
+$env:UNIVERSAL_DRIVER_INSTALLER_DRIVER_DEPLOYMENT_PHASE =
     $DriverDeploymentPhase
 
-$env:ITINO_DRIVER_DEPLOYMENT_RELEASE_CHANNEL =
+$env:UNIVERSAL_DRIVER_INSTALLER_DRIVER_DEPLOYMENT_RELEASE_CHANNEL =
     $DriverDeploymentReleaseChannel
 
-$env:ITINO_DRIVER_DEPLOYMENT_BUILD_DATE =
+$env:UNIVERSAL_DRIVER_INSTALLER_DRIVER_DEPLOYMENT_BUILD_DATE =
     $DriverDeploymentBuildDate
 
-$env:ITINO_CONTROLLER_VERSION =
+$env:UNIVERSAL_DRIVER_INSTALLER_CONTROLLER_VERSION =
     $ScriptVersion
 
 
@@ -259,12 +259,12 @@ $WriteLogFiles =
 #     $false
 #
 # Files:
-#   C:\ProgramData\Itino\DriverDeployment\ConsoleOutput-SessionA1B2C3D4-Cycle1.log
-#   C:\ProgramData\Itino\DriverDeployment\ConsoleOutput-SessionA1B2C3D4-Cycle2.log
+#   C:\ProgramData\UniversalDriverInstaller\DriverDeployment\ConsoleOutput-SessionA1B2C3D4-Cycle1.log
+#   C:\ProgramData\UniversalDriverInstaller\DriverDeployment\ConsoleOutput-SessionA1B2C3D4-Cycle2.log
 #
 # The transcript survives exit 3010 and exit 1.
 # On final exit 0 the transcript is stopped before the complete
-# C:\ProgramData\Itino folder is deleted.
+# C:\ProgramData\UniversalDriverInstaller folder is deleted.
 
 $SaveFullConsoleOutput =
     $true
@@ -272,7 +272,7 @@ $SaveFullConsoleOutput =
 
 # If deployment fails, preserve one combined error log:
 #
-# C:\ProgramData\Itino\DriverDeployment-Error.log
+# C:\ProgramData\UniversalDriverInstaller\DriverDeployment-Error.log
 
 $KeepErrorLogOnFailure =
     $true
@@ -281,22 +281,22 @@ $KeepErrorLogOnFailure =
 # MASTER CLEANUP SWITCH
 #
 # $false:
-#   Keep all C:\ProgramData\Itino deployment data.
+#   Keep all C:\ProgramData\UniversalDriverInstaller deployment data.
 #   Useful while testing/debugging.
 #
 # $true:
 #   On FINAL clean success (exit 0), remove the complete:
-#       C:\ProgramData\Itino\
+#       C:\ProgramData\UniversalDriverInstaller\
 #
 # IMPORTANT:
-#   - Exit 3010 always preserves ITINO state for the next cycle.
+#   - Exit 3010 always preserves Universal Driver Installer state for the next cycle.
 #   - Real failures preserve artifacts when
 #     $PreserveArtifactsOnFailure = $true.
 #
-# This is the only switch controlling complete ITINO-root
+# This is the only switch controlling complete UniversalDriverInstaller-root
 # deletion after a successful deployment.
 #
-# DriverRollback is part of C:\ProgramData\Itino and follows
+# DriverRollback is part of C:\ProgramData\UniversalDriverInstaller and follows
 # this same switch. There is no separate rollback cleanup option.
 
 $CleanupAfterDeployment =
@@ -361,7 +361,7 @@ $MaximumDeploymentCycles =
 $EnableSingleInstanceProtection =
     $true
 
-# Keep ALL ITINO diagnostics/rollback data on a real failure.
+# Keep ALL Universal Driver Installer diagnostics/rollback data on a real failure.
 $PreserveArtifactsOnFailure =
     $true
 
@@ -473,7 +473,7 @@ $LenovoLSUClientSeverities =
 # EXPORT OPTIONS TO CHILD POWERSHELL PROCESSES
 # ============================================================
 
-$env:ITINO_WRITE_LOG_FILES =
+$env:UNIVERSAL_DRIVER_INSTALLER_WRITE_LOG_FILES =
     if ($WriteLogFiles) {
         '1'
     }
@@ -484,7 +484,7 @@ $env:ITINO_WRITE_LOG_FILES =
 
 
 
-$env:ITINO_UNATTENDED_MODE =
+$env:UNIVERSAL_DRIVER_INSTALLER_UNATTENDED_MODE =
     if ($UnattendedMode) {
         '1'
     }
@@ -493,7 +493,7 @@ $env:ITINO_UNATTENDED_MODE =
     }
 
 
-$env:ITINO_CLOSE_LENOVO_HOTKEY_POPUP =
+$env:UNIVERSAL_DRIVER_INSTALLER_CLOSE_LENOVO_HOTKEY_POPUP =
     if ($CloseLenovoHotkeyPopup) {
         '1'
     }
@@ -502,7 +502,7 @@ $env:ITINO_CLOSE_LENOVO_HOTKEY_POPUP =
     }
 
 
-$env:ITINO_REQUIRE_ADMINISTRATOR =
+$env:UNIVERSAL_DRIVER_INSTALLER_REQUIRE_ADMINISTRATOR =
     if ($RequireAdministrator) {
         '1'
     }
@@ -511,7 +511,7 @@ $env:ITINO_REQUIRE_ADMINISTRATOR =
     }
 
 
-$env:ITINO_PRESERVE_INITIAL_DRIVER_BASELINE =
+$env:UNIVERSAL_DRIVER_INSTALLER_PRESERVE_INITIAL_DRIVER_BASELINE =
     if ($PreserveInitialDriverBaselineAcrossRestarts) {
         '1'
     }
@@ -520,61 +520,61 @@ $env:ITINO_PRESERVE_INITIAL_DRIVER_BASELINE =
     }
 
 
-$env:ITINO_MINIMUM_FIRMWARE_BATTERY_PERCENT =
+$env:UNIVERSAL_DRIVER_INSTALLER_MINIMUM_FIRMWARE_BATTERY_PERCENT =
     [string]$MinimumFirmwareBatteryPercent
 
 
-$env:ITINO_MINIMUM_SYSTEM_DRIVE_FREE_GB =
+$env:UNIVERSAL_DRIVER_INSTALLER_MINIMUM_SYSTEM_DRIVE_FREE_GB =
     [string]$MinimumSystemDriveFreeGB
 
 
-$env:ITINO_WEB_TIMEOUT_SECONDS =
+$env:UNIVERSAL_DRIVER_INSTALLER_WEB_TIMEOUT_SECONDS =
     [string]$WebTimeoutSeconds
 
 
-$env:ITINO_MINIMUM_POWERSHELL_MAJOR_VERSION =
+$env:UNIVERSAL_DRIVER_INSTALLER_MINIMUM_POWERSHELL_MAJOR_VERSION =
     [string]$MinimumPowerShellMajorVersion
 
 
 # OEM source configuration for 02-Install-OEM-Update-Tool.ps1
 
-$env:ITINO_DELL_COMMAND_UPDATE_OFFICIAL_PAGE_URL =
+$env:UNIVERSAL_DRIVER_INSTALLER_DELL_COMMAND_UPDATE_OFFICIAL_PAGE_URL =
     [string]$DellCommandUpdateOfficialPageUrl
 
-$env:ITINO_DELL_COMMAND_UPDATE_FALLBACK_VERSION =
+$env:UNIVERSAL_DRIVER_INSTALLER_DELL_COMMAND_UPDATE_FALLBACK_VERSION =
     [string]$DellCommandUpdateFallbackVersion
 
-$env:ITINO_DELL_COMMAND_UPDATE_FALLBACK_DOWNLOAD_URL =
+$env:UNIVERSAL_DRIVER_INSTALLER_DELL_COMMAND_UPDATE_FALLBACK_DOWNLOAD_URL =
     [string]$DellCommandUpdateFallbackDownloadUrl
 
-$env:ITINO_HP_IMAGE_ASSISTANT_OFFICIAL_PAGE_URL =
+$env:UNIVERSAL_DRIVER_INSTALLER_HP_IMAGE_ASSISTANT_OFFICIAL_PAGE_URL =
     [string]$HPImageAssistantOfficialPageUrl
 
-$env:ITINO_HP_IMAGE_ASSISTANT_FALLBACK_VERSION =
+$env:UNIVERSAL_DRIVER_INSTALLER_HP_IMAGE_ASSISTANT_FALLBACK_VERSION =
     [string]$HPImageAssistantFallbackVersion
 
-$env:ITINO_HP_IMAGE_ASSISTANT_FALLBACK_DOWNLOAD_URL =
+$env:UNIVERSAL_DRIVER_INSTALLER_HP_IMAGE_ASSISTANT_FALLBACK_DOWNLOAD_URL =
     [string]$HPImageAssistantFallbackDownloadUrl
 
 
-$env:ITINO_LENOVO_SYSTEM_UPDATE_VERSION =
+$env:UNIVERSAL_DRIVER_INSTALLER_LENOVO_SYSTEM_UPDATE_VERSION =
     [string]$LenovoSystemUpdateVersion
 
-$env:ITINO_LENOVO_SYSTEM_UPDATE_DOWNLOAD_URL =
+$env:UNIVERSAL_DRIVER_INSTALLER_LENOVO_SYSTEM_UPDATE_DOWNLOAD_URL =
     [string]$LenovoSystemUpdateDownloadUrl
-$env:ITINO_LENOVO_LSUCLIENT_MODULE_NAME =
+$env:UNIVERSAL_DRIVER_INSTALLER_LENOVO_LSUCLIENT_MODULE_NAME =
     [string]$LenovoLSUClientModuleName
 
-$env:ITINO_LENOVO_LSUCLIENT_REPOSITORY =
+$env:UNIVERSAL_DRIVER_INSTALLER_LENOVO_LSUCLIENT_REPOSITORY =
     [string]$LenovoLSUClientRepository
 
-$env:ITINO_LENOVO_LSUCLIENT_MAXIMUM_ROUNDS =
+$env:UNIVERSAL_DRIVER_INSTALLER_LENOVO_LSUCLIENT_MAXIMUM_ROUNDS =
     [string]$LenovoLSUClientMaximumRounds
 
-$env:ITINO_LENOVO_LSUCLIENT_UPDATE_TYPES =
+$env:UNIVERSAL_DRIVER_INSTALLER_LENOVO_LSUCLIENT_UPDATE_TYPES =
     [string]$LenovoLSUClientUpdateTypes
 
-$env:ITINO_LENOVO_LSUCLIENT_SEVERITIES =
+$env:UNIVERSAL_DRIVER_INSTALLER_LENOVO_LSUCLIENT_SEVERITIES =
     [string]$LenovoLSUClientSeverities
 
 # ============================================================
@@ -598,25 +598,25 @@ $CopiedLogsRoot =
         $CopiedLogsFolderName
 
 
-$ItinoRoot =
-    'C:\ProgramData\Itino'
+$UniversalDriverInstallerRoot =
+    'C:\ProgramData\UniversalDriverInstaller'
 
 
 $BasePath =
     Join-Path `
-        $ItinoRoot `
+        $UniversalDriverInstallerRoot `
         'DriverDeployment'
 
 
 $DeploymentStateFile =
     Join-Path `
-        $ItinoRoot `
+        $UniversalDriverInstallerRoot `
         'DriverDeploymentState.json'
 
 
 $DeploymentResultFile =
     Join-Path `
-        $ItinoRoot `
+        $UniversalDriverInstallerRoot `
         'DriverDeploymentResult.json'
 
 
@@ -691,12 +691,12 @@ $HardwareFile =
 # That means normal cleanup cannot remove the failure log.
 
 $PersistentErrorLog =
-    'C:\ProgramData\Itino\DriverDeployment-Error.log'
+    'C:\ProgramData\UniversalDriverInstaller\DriverDeployment-Error.log'
 
 
 
 $DriverRollbackRoot =
-    'C:\ProgramData\Itino\DriverRollback'
+    'C:\ProgramData\UniversalDriverInstaller\DriverRollback'
 
 
 # ============================================================
@@ -762,12 +762,12 @@ $Scripts =
 
 if (
     -not (
-        Test-Path -LiteralPath $ItinoRoot
+        Test-Path -LiteralPath $UniversalDriverInstallerRoot
     )
 ) {
 
     New-Item `
-        -Path $ItinoRoot `
+        -Path $UniversalDriverInstallerRoot `
         -ItemType Directory `
         -Force |
         Out-Null
@@ -818,7 +818,7 @@ if ($WriteLogFiles) {
 # ConsoleOutput-Cycle4.log.
 # ============================================================
 
-function Start-ItinoConsoleTranscript {
+function Start-UniversalDriverInstallerConsoleTranscript {
 
     if (-not $SaveFullConsoleOutput) {
         return
@@ -907,7 +907,7 @@ function Start-ItinoConsoleTranscript {
 }
 
 
-function Copy-ItinoLogsToScriptLocation {
+function Copy-UniversalDriverInstallerLogsToScriptLocation {
 
     if (-not $CopyLogsToScriptLocation) {
         return
@@ -1177,7 +1177,7 @@ function Copy-ItinoLogsToScriptLocation {
 }
 
 
-function Publish-ItinoArtifactsToTemp {
+function Publish-UniversalDriverInstallerArtifactsToTemp {
     <#
         Copies the current driver deployment logs, JSON reports and restart
         markers to a stable Windows Temp folder before cleanup or exit.
@@ -1185,16 +1185,16 @@ function Publish-ItinoArtifactsToTemp {
     #>
 
     $TempPublishPath =
-        'C:\Windows\Temp\ITINO-Deployment\Driver'
+        'C:\Windows\Temp\UniversalDriverInstaller-Deployment\Driver'
 
     try {
         if (-not (Test-Path -LiteralPath $TempPublishPath)) {
             New-Item -ItemType Directory -Path $TempPublishPath -Force -ErrorAction Stop | Out-Null
         }
 
-        if (Test-Path -LiteralPath $ItinoRoot -PathType Container) {
-            foreach ($File in @(Get-ChildItem -LiteralPath $ItinoRoot -File -Recurse -ErrorAction SilentlyContinue)) {
-                $RelativeName = $File.FullName.Substring($ItinoRoot.Length).TrimStart('\')
+        if (Test-Path -LiteralPath $UniversalDriverInstallerRoot -PathType Container) {
+            foreach ($File in @(Get-ChildItem -LiteralPath $UniversalDriverInstallerRoot -File -Recurse -ErrorAction SilentlyContinue)) {
+                $RelativeName = $File.FullName.Substring($UniversalDriverInstallerRoot.Length).TrimStart('\')
                 $Destination = Join-Path $TempPublishPath $RelativeName
                 $DestinationDirectory = Split-Path -Parent $Destination
 
@@ -1215,7 +1215,7 @@ function Publish-ItinoArtifactsToTemp {
 }
 
 
-function Stop-ItinoConsoleTranscript {
+function Stop-UniversalDriverInstallerConsoleTranscript {
 
     if (-not $script:ConsoleTranscriptStarted) {
         return
@@ -1243,7 +1243,7 @@ function Stop-ItinoConsoleTranscript {
 # to the active deployment.
 # ============================================================
 
-function Remove-ItinoPreviousFailureLog {
+function Remove-UniversalDriverInstallerPreviousFailureLog {
 
     if (
         Test-Path -LiteralPath $PersistentErrorLog
@@ -1267,7 +1267,7 @@ function Remove-ItinoPreviousFailureLog {
 }
 
 
-function Remove-ItinoPreviousRestartMarker {
+function Remove-UniversalDriverInstallerPreviousRestartMarker {
 
     if (
         Test-Path -LiteralPath $RestartFile
@@ -1305,7 +1305,7 @@ function Remove-ItinoPreviousRestartMarker {
 #
 #     The buffer is written to:
 #
-#     C:\ProgramData\Itino\DriverDeployment-Error.log
+#     C:\ProgramData\UniversalDriverInstaller\DriverDeployment-Error.log
 #
 # ============================================================
 
@@ -1625,7 +1625,7 @@ function Save-DeploymentErrorLog {
 
                 '============================================================'
 
-                'ITINO DRIVER DEPLOYMENT FAILURE'
+                'UNIVERSAL DRIVER INSTALLER FAILURE'
 
                 '============================================================'
 
@@ -1690,7 +1690,7 @@ $script:ControllerSpecialMessage =
     $null
 
 
-function Get-ItinoWindowsBootTime {
+function Get-UniversalDriverInstallerWindowsBootTime {
 
     try {
         $OperatingSystem =
@@ -1713,7 +1713,7 @@ function Get-ItinoWindowsBootTime {
 }
 
 
-function Enter-ItinoDeploymentMutex {
+function Enter-UniversalDriverInstallerDeploymentMutex {
 
     if (-not $EnableSingleInstanceProtection) {
         return
@@ -1722,7 +1722,7 @@ function Enter-ItinoDeploymentMutex {
     $script:DeploymentMutex =
         New-Object System.Threading.Mutex(
             $false,
-            'Global\ITINO-DriverDeployment'
+            'Global\UniversalDriverInstaller-DriverDeployment'
         )
 
     try {
@@ -1739,12 +1739,12 @@ function Enter-ItinoDeploymentMutex {
         $script:ControllerSpecialExitCode =
             1618
 
-        throw 'Another ITINO driver deployment is already running.'
+        throw 'Another Universal Driver Installer is already running.'
     }
 }
 
 
-function Exit-ItinoDeploymentMutex {
+function Exit-UniversalDriverInstallerDeploymentMutex {
 
     if (
         $script:DeploymentMutex -and
@@ -1773,7 +1773,7 @@ function Exit-ItinoDeploymentMutex {
 }
 
 
-function Save-ItinoDeploymentSession {
+function Save-UniversalDriverInstallerDeploymentSession {
 
     param(
         [Parameter(Mandatory)]
@@ -1798,7 +1798,7 @@ function Save-ItinoDeploymentSession {
 }
 
 
-function Initialize-ItinoDeploymentSession {
+function Initialize-UniversalDriverInstallerDeploymentSession {
 
     $Existing =
         $null
@@ -1850,7 +1850,7 @@ function Initialize-ItinoDeploymentSession {
                         ([datetime]$SavedBootTimeProperty.Value).ToUniversalTime()
 
                     $CurrentBootTime =
-                        Get-ItinoWindowsBootTime
+                        Get-UniversalDriverInstallerWindowsBootTime
                 }
                 catch {
                     throw (
@@ -1995,19 +1995,19 @@ function Initialize-ItinoDeploymentSession {
             }
     }
 
-    Save-ItinoDeploymentSession -Status 'InProgress'
+    Save-UniversalDriverInstallerDeploymentSession -Status 'InProgress'
 
-    $env:ITINO_DEPLOYMENT_SESSION_ID =
+    $env:UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_SESSION_ID =
         [string]$script:DeploymentSession.SessionId
 
-    $env:ITINO_DEPLOYMENT_CYCLE =
+    $env:UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_CYCLE =
         [string]$script:DeploymentSession.Cycle
 
     $script:FinalVerificationOnly =
         [bool]$script:DeploymentSession.FinalVerificationOnly
 
 
-    Write-ItinoProjectMetadata
+    Write-UniversalDriverInstallerProjectMetadata
 
 
     Write-Log -Message (
@@ -2019,7 +2019,7 @@ function Initialize-ItinoDeploymentSession {
 }
 
 
-function Get-ItinoProjectMetadata {
+function Get-UniversalDriverInstallerProjectMetadata {
 
     return [PSCustomObject]@{
 
@@ -2071,7 +2071,7 @@ function Get-ItinoProjectMetadata {
 }
 
 
-function Write-ItinoProjectMetadata {
+function Write-UniversalDriverInstallerProjectMetadata {
 
     try {
 
@@ -2090,7 +2090,7 @@ function Write-ItinoProjectMetadata {
         }
 
 
-        Get-ItinoProjectMetadata |
+        Get-UniversalDriverInstallerProjectMetadata |
             ConvertTo-Json `
                 -Depth 6 |
             Set-Content `
@@ -2115,7 +2115,7 @@ function Write-ItinoProjectMetadata {
 }
 
 
-function Get-ItinoFirmwareSafety {
+function Get-UniversalDriverInstallerFirmwareSafety {
 
     $BatteryPresent =
         $false
@@ -2303,7 +2303,7 @@ function Get-ItinoFirmwareSafety {
     }
 }
 
-function Get-ItinoBitLockerSummary {
+function Get-UniversalDriverInstallerBitLockerSummary {
 
     try {
 
@@ -2348,7 +2348,7 @@ function Get-ItinoBitLockerSummary {
 }
 
 
-function Save-ItinoMachineReadableResult {
+function Save-UniversalDriverInstallerMachineReadableResult {
 
     param(
         [Parameter(Mandatory)]
@@ -2402,11 +2402,11 @@ function Save-ItinoMachineReadableResult {
 }
 
 
-function Remove-EntireItinoRoot {
+function Remove-EntireUniversalDriverInstallerRoot {
 
     # CleanupAfterDeployment is the single master cleanup switch.
     #
-    # If disabled, keep the complete ITINO tree including:
+    # If disabled, keep the complete Universal Driver Installer tree including:
     #   - console transcripts
     #   - deployment state/results
     #   - hardware/verification reports
@@ -2417,7 +2417,7 @@ function Remove-EntireItinoRoot {
     if (-not $CleanupAfterDeployment) {
 
         Write-Log -Message (
-            'Final ITINO root cleanup skipped because ' +
+            'Final Universal Driver Installer root cleanup skipped because ' +
             'CleanupAfterDeployment is False.'
         )
 
@@ -2425,35 +2425,35 @@ function Remove-EntireItinoRoot {
     }
 
     # Close the transcript file handle before deleting its
-    # parent C:\ProgramData\Itino directory.
-    Stop-ItinoConsoleTranscript
+    # parent C:\ProgramData\UniversalDriverInstaller directory.
+    Stop-UniversalDriverInstallerConsoleTranscript
 
-    Copy-ItinoLogsToScriptLocation
+    Copy-UniversalDriverInstallerLogsToScriptLocation
 
     Write-Host ''
     Write-Host (
-        "Final clean success. Removing complete ITINO data root: $ItinoRoot"
+        "Final clean success. Removing complete Universal Driver Installer data root: $UniversalDriverInstallerRoot"
     )
 
     try {
 
         if (
-            Test-Path -LiteralPath $ItinoRoot
+            Test-Path -LiteralPath $UniversalDriverInstallerRoot
         ) {
             Remove-Item `
-                -LiteralPath $ItinoRoot `
+                -LiteralPath $UniversalDriverInstallerRoot `
                 -Recurse `
                 -Force `
                 -ErrorAction Stop
         }
 
         Write-Host (
-            'All ITINO-generated ProgramData files were removed.'
+            'All UniversalDriverInstaller-generated ProgramData files were removed.'
         )
     }
     catch {
         Write-Host (
-            'WARNING: Deployment succeeded, but the complete ITINO ' +
+            'WARNING: Deployment succeeded, but the complete Universal Driver Installer ' +
             "ProgramData root could not be removed. Error: $($_.Exception.Message)"
         )
     }
@@ -2837,8 +2837,8 @@ function Invoke-FinalCleanup {
 
     # DriverRollback is intentionally not deleted separately here.
     #
-    # On final clean success, Remove-EntireItinoRoot removes the
-    # complete C:\ProgramData\Itino tree, including DriverRollback,
+    # On final clean success, Remove-EntireUniversalDriverInstallerRoot removes the
+    # complete C:\ProgramData\UniversalDriverInstaller tree, including DriverRollback,
     # when CleanupAfterDeployment = $true.
     #
     # During failure cleanup, rollback data remains available for
@@ -3070,7 +3070,7 @@ function Show-DeploymentFinished {
 }
 
 
-function Read-ItinoJsonFile {
+function Read-UniversalDriverInstallerJsonFile {
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Description
@@ -3539,7 +3539,7 @@ try {
 
     Write-Host ''
     Write-Host '============================================================'
-    Write-Host 'ITINO Driver Deployment'
+    Write-Host 'Universal Driver Installer'
     Write-Host '============================================================'
     Write-Host ''
 
@@ -3640,7 +3640,7 @@ try {
     )
 
     Write-Log -Message (
-        'Final clean-success ITINO root deletion, including rollback data, follows ' +
+        'Final clean-success Universal Driver Installer root deletion, including rollback data, follows ' +
         "CleanupAfterDeployment: $CleanupAfterDeployment"
     )
 
@@ -3696,20 +3696,20 @@ try {
     # PHASE 9 - SESSION / SINGLE INSTANCE / FIRMWARE SAFETY
     # ========================================================
 
-    Enter-ItinoDeploymentMutex
+    Enter-UniversalDriverInstallerDeploymentMutex
 
-    Initialize-ItinoDeploymentSession
+    Initialize-UniversalDriverInstallerDeploymentSession
 
-    Start-ItinoConsoleTranscript
+    Start-UniversalDriverInstallerConsoleTranscript
 
-    Remove-ItinoPreviousFailureLog
+    Remove-UniversalDriverInstallerPreviousFailureLog
 
-    Remove-ItinoPreviousRestartMarker
+    Remove-UniversalDriverInstallerPreviousRestartMarker
 
     $FirmwareSafety =
-        Get-ItinoFirmwareSafety
+        Get-UniversalDriverInstallerFirmwareSafety
 
-    $env:ITINO_ALLOW_FIRMWARE_UPDATES =
+    $env:UNIVERSAL_DRIVER_INSTALLER_ALLOW_FIRMWARE_UPDATES =
         if ($FirmwareSafety.Allowed) {
             '1'
         }
@@ -3729,7 +3729,7 @@ try {
     )
 
     Write-Log -Message (
-        "BitLocker: $(Get-ItinoBitLockerSummary)"
+        "BitLocker: $(Get-UniversalDriverInstallerBitLockerSummary)"
     )
 
 
@@ -4055,12 +4055,12 @@ try {
     # ========================================================
 
     $HardwareInformation =
-        Read-ItinoJsonFile `
+        Read-UniversalDriverInstallerJsonFile `
             -Path $HardwareFile `
             -Description 'HardwareInformation.json'
 
     $DriverVerification =
-        Read-ItinoJsonFile `
+        Read-UniversalDriverInstallerJsonFile `
             -Path $VerificationFile `
             -Description 'DriverVerification.json'
 
@@ -4353,7 +4353,7 @@ try {
                 3
 
             Project =
-                Get-ItinoProjectMetadata
+                Get-UniversalDriverInstallerProjectMetadata
 
             Outcome =
                 $FinalOutcome
@@ -4479,7 +4479,7 @@ try {
     $Summary =
         [PSCustomObject]@{
             SchemaVersion = 3
-            Project = Get-ItinoProjectMetadata
+            Project = Get-UniversalDriverInstallerProjectMetadata
             ComputerName = $env:COMPUTERNAME
             SessionId =
                 if ($script:DeploymentSession) {
@@ -4962,7 +4962,7 @@ Write-Host 'Final Result'
     #
     # ========================================================
 
-    Save-ItinoMachineReadableResult `
+    Save-UniversalDriverInstallerMachineReadableResult `
         -ExitCode $FinalExitCode `
         -Status $OverallStatus
 
@@ -4971,7 +4971,7 @@ Write-Host 'Final Result'
     ) {
 
         $RestartRequestBootTime =
-            Get-ItinoWindowsBootTime
+            Get-UniversalDriverInstallerWindowsBootTime
 
         $script:DeploymentSession.BootTimeAtRestartRequest =
             $RestartRequestBootTime.ToString('o')
@@ -4981,14 +4981,14 @@ Write-Host 'Final Result'
             $script:DeploymentSession.BootTimeAtRestartRequest
         )
 
-        Save-ItinoDeploymentSession `
+        Save-UniversalDriverInstallerDeploymentSession `
             -Status 'RestartRequired'
 
-        Publish-ItinoArtifactsToTemp
+        Publish-UniversalDriverInstallerArtifactsToTemp
 
         Write-Log `
             -Message (
-                'Restart required. Preserving ITINO state, reports and ' +
+                'Restart required. Preserving Universal Driver Installer state, reports and ' +
                 'the ORIGINAL rollback baseline for the next cycle.'
             ) `
             -Level 'WARNING'
@@ -4997,15 +4997,15 @@ Write-Host 'Final Result'
         $FinalExitCode -eq 1
     ) {
 
-        Save-ItinoDeploymentSession `
+        Save-UniversalDriverInstallerDeploymentSession `
             -Status 'Failed'
 
-        Publish-ItinoArtifactsToTemp
+        Publish-UniversalDriverInstallerArtifactsToTemp
 
         if ($PreserveArtifactsOnFailure) {
             Write-Log `
                 -Message (
-                    'Deployment failed. Preserving complete ITINO ' +
+                    'Deployment failed. Preserving complete Universal Driver Installer ' +
                     'diagnostics and rollback data.'
                 ) `
                 -Level 'WARNING'
@@ -5016,13 +5016,13 @@ Write-Host 'Final Result'
     }
     else {
 
-        Save-ItinoDeploymentSession `
+        Save-UniversalDriverInstallerDeploymentSession `
             -Status 'Success'
 
-        # Must run before final success cleanup removes C:\ProgramData\Itino.
-        Publish-ItinoArtifactsToTemp
+        # Must run before final success cleanup removes C:\ProgramData\UniversalDriverInstaller.
+        Publish-UniversalDriverInstallerArtifactsToTemp
 
-        Remove-EntireItinoRoot
+        Remove-EntireUniversalDriverInstallerRoot
     }
 
 
@@ -5037,11 +5037,11 @@ Write-Host 'Final Result'
     )
 
 
-    Stop-ItinoConsoleTranscript
+    Stop-UniversalDriverInstallerConsoleTranscript
 
-    Copy-ItinoLogsToScriptLocation
+    Copy-UniversalDriverInstallerLogsToScriptLocation
 
-    Exit-ItinoDeploymentMutex
+    Exit-UniversalDriverInstallerDeploymentMutex
 
 
     exit $FinalExitCode
@@ -5061,7 +5061,7 @@ catch {
     ) {
         Write-Host ''
         Write-Host '============================================================'
-        Write-Host 'ITINO Driver Deployment'
+        Write-Host 'Universal Driver Installer'
         Write-Host '============================================================'
         Write-Host ''
         Write-Host 'A Windows restart is still required.'
@@ -5074,14 +5074,14 @@ catch {
         try {
             Write-Log -Message $script:ControllerSpecialMessage -Level 'WARNING'
 
-            Save-ItinoMachineReadableResult `
+            Save-UniversalDriverInstallerMachineReadableResult `
                 -ExitCode 3010 `
                 -Status 'RestartRequired'
 
-            Save-ItinoDeploymentSession `
+            Save-UniversalDriverInstallerDeploymentSession `
                 -Status 'RestartRequired'
 
-            Publish-ItinoArtifactsToTemp
+            Publish-UniversalDriverInstallerArtifactsToTemp
         }
         catch {
             Write-Host (
@@ -5090,9 +5090,9 @@ catch {
             )
         }
 
-        Stop-ItinoConsoleTranscript
-        Copy-ItinoLogsToScriptLocation
-        Exit-ItinoDeploymentMutex
+        Stop-UniversalDriverInstallerConsoleTranscript
+        Copy-UniversalDriverInstallerLogsToScriptLocation
+        Exit-UniversalDriverInstallerDeploymentMutex
         exit 3010
     }
 
@@ -5116,18 +5116,18 @@ catch {
 
         Write-Host ''
         Write-Host '============================================================'
-        Write-Host 'ITINO Driver Deployment'
+        Write-Host 'Universal Driver Installer'
         Write-Host '============================================================'
         Write-Host ''
-        Write-Host 'Another ITINO driver deployment is already running.'
+        Write-Host 'Another Universal Driver Installer is already running.'
         Write-Host 'No active deployment files were changed by this instance.'
         Write-Host ''
         Write-Host 'Exit Code : 1618'
         Write-Host ''
 
-        Stop-ItinoConsoleTranscript
+        Stop-UniversalDriverInstallerConsoleTranscript
 
-        Exit-ItinoDeploymentMutex
+        Exit-UniversalDriverInstallerDeploymentMutex
 
         exit 1618
     }
@@ -5198,17 +5198,17 @@ catch {
 
 
     try {
-        Save-ItinoMachineReadableResult `
+        Save-UniversalDriverInstallerMachineReadableResult `
             -ExitCode 1 `
             -Status 'Failed'
 
-        Save-ItinoDeploymentSession `
+        Save-UniversalDriverInstallerDeploymentSession `
             -Status 'Failed'
     }
     catch {
     }
 
-    Publish-ItinoArtifactsToTemp
+    Publish-UniversalDriverInstallerArtifactsToTemp
 
 
     if (-not $PreserveArtifactsOnFailure) {
@@ -5217,16 +5217,16 @@ catch {
     else {
         Write-Host ''
         Write-Host (
-            'Failure artifacts preserved under C:\ProgramData\Itino.'
+            'Failure artifacts preserved under C:\ProgramData\UniversalDriverInstaller.'
         )
     }
 
 
-    Stop-ItinoConsoleTranscript
+    Stop-UniversalDriverInstallerConsoleTranscript
 
-    Copy-ItinoLogsToScriptLocation
+    Copy-UniversalDriverInstallerLogsToScriptLocation
 
-    Exit-ItinoDeploymentMutex
+    Exit-UniversalDriverInstallerDeploymentMutex
 
 
     # ========================================================

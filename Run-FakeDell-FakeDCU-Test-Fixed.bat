@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 
 rem ============================================================
-rem ITINO FAKE DELL FULL TEST WITH FAKE DCU
+rem Universal Driver Installer FAKE DELL FULL TEST WITH FAKE DCU
 rem ============================================================
 rem
 rem Sequence:
@@ -25,7 +25,7 @@ set "INSTALLTOOL=%ROOT%Scripts\02-Install-OEM-Update-Tool.ps1"
 set "UPDATEDRIVERS=%ROOT%Scripts\03-Update-Drivers.ps1"
 set "VERIFYDRIVERS=%ROOT%Scripts\04-Verify-Drivers.ps1"
 
-set "HARDWAREJSON=C:\ProgramData\Itino\DriverDeployment\HardwareInformation.json"
+set "HARDWAREJSON=C:\ProgramData\UniversalDriverInstaller\DriverDeployment\HardwareInformation.json"
 
 rem ============================================================
 rem FAKE DCU SCENARIO
@@ -102,7 +102,7 @@ rem ============================================================
 
 (
     echo ============================================================
-    echo ITINO FAKE DELL FULL TEST WITH FAKE DCU
+    echo Universal Driver Installer FAKE DELL FULL TEST WITH FAKE DCU
     echo ============================================================
     echo Start Time        : %date% %time%
     echo Computer          : %COMPUTERNAME%
@@ -115,7 +115,7 @@ rem ============================================================
 
 echo.
 echo ============================================================
-echo ITINO FAKE DELL FULL TEST WITH FAKE DCU
+echo Universal Driver Installer FAKE DELL FULL TEST WITH FAKE DCU
 echo ============================================================
 echo.
 echo Scenario:
@@ -130,20 +130,20 @@ rem ============================================================
 rem CONTROLLER ENVIRONMENT
 rem ============================================================
 
-set "ITINO_WRITE_LOG_FILES=1"
-set "ITINO_UNATTENDED_MODE=1"
-set "ITINO_REQUIRE_ADMINISTRATOR=1"
-set "ITINO_WEB_TIMEOUT_SECONDS=15"
-set "ITINO_MINIMUM_POWERSHELL_MAJOR_VERSION=5"
+set "UNIVERSAL_DRIVER_INSTALLER_WRITE_LOG_FILES=1"
+set "UNIVERSAL_DRIVER_INSTALLER_UNATTENDED_MODE=1"
+set "UNIVERSAL_DRIVER_INSTALLER_REQUIRE_ADMINISTRATOR=1"
+set "UNIVERSAL_DRIVER_INSTALLER_WEB_TIMEOUT_SECONDS=15"
+set "UNIVERSAL_DRIVER_INSTALLER_MINIMUM_POWERSHELL_MAJOR_VERSION=5"
 
 rem Safety: never permit BIOS/firmware in this fake Dell Lenovo test.
-set "ITINO_ALLOW_FIRMWARE_UPDATES=0"
+set "UNIVERSAL_DRIVER_INSTALLER_ALLOW_FIRMWARE_UPDATES=0"
 
-set "ITINO_DELL_COMMAND_UPDATE_OFFICIAL_PAGE_URL=https://www.dell.com/support/kbdoc/en-us/000177325/dell-command-update"
-set "ITINO_DELL_COMMAND_UPDATE_FALLBACK_VERSION=5.7.1"
-set "ITINO_DELL_COMMAND_UPDATE_FALLBACK_DOWNLOAD_URL=https://dl.dell.com/FOLDER14847331M/2/Dell-Command-Update-Windows-Universal-Application_P0P70_WIN64_5.7.1_A00.EXE"
+set "UNIVERSAL_DRIVER_INSTALLER_DELL_COMMAND_UPDATE_OFFICIAL_PAGE_URL=https://www.dell.com/support/kbdoc/en-us/000177325/dell-command-update"
+set "UNIVERSAL_DRIVER_INSTALLER_DELL_COMMAND_UPDATE_FALLBACK_VERSION=5.7.1"
+set "UNIVERSAL_DRIVER_INSTALLER_DELL_COMMAND_UPDATE_FALLBACK_DOWNLOAD_URL=https://dl.dell.com/FOLDER14847331M/2/Dell-Command-Update-Windows-Universal-Application_P0P70_WIN64_5.7.1_A00.EXE"
 
-set "ITINO_FAKE_DCU_SCENARIO=%FAKE_DCU_SCENARIO%"
+set "UNIVERSAL_DRIVER_INSTALLER_FAKE_DCU_SCENARIO=%FAKE_DCU_SCENARIO%"
 
 set "RESTART_REQUIRED=0"
 

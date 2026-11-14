@@ -1,9 +1,9 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
-title ITINO Driver Rollback
+title Universal Driver Installer - Driver Rollback
 
 rem ============================================================
-rem ITINO Driver Rollback Launcher
+rem Universal Driver Installer - Driver Rollback Launcher
 rem
 rem Place this BAT in the same folder as:
 rem     05-Rollback-Drivers.ps1
@@ -56,7 +56,7 @@ if not "%errorlevel%"=="0" (
 :MENU
 cls
 echo ============================================================
-echo ITINO Driver Rollback
+echo Universal Driver Installer - Driver Rollback
 echo ============================================================
 echo.
 echo Script:
@@ -128,10 +128,10 @@ echo Example:
 echo PCI\VEN_8086^&DEV_1234^&SUBSYS_...
 echo.
 
-set "ITINO_ROLLBACK_DEVICE_ID="
-set /p "ITINO_ROLLBACK_DEVICE_ID=Paste the exact DeviceID: "
+set "UNIVERSAL_DRIVER_INSTALLER_ROLLBACK_DEVICE_ID="
+set /p "UNIVERSAL_DRIVER_INSTALLER_ROLLBACK_DEVICE_ID=Paste the exact DeviceID: "
 
-if not defined ITINO_ROLLBACK_DEVICE_ID (
+if not defined UNIVERSAL_DRIVER_INSTALLER_ROLLBACK_DEVICE_ID (
     echo.
     echo No DeviceID entered.
     pause
@@ -140,7 +140,7 @@ if not defined ITINO_ROLLBACK_DEVICE_ID (
 
 echo.
 echo Selected DeviceID:
-echo %ITINO_ROLLBACK_DEVICE_ID%
+echo %UNIVERSAL_DRIVER_INSTALLER_ROLLBACK_DEVICE_ID%
 echo.
 echo WARNING:
 echo This will attempt to replace the current driver with the
@@ -165,7 +165,7 @@ powershell.exe ^
     -NoProfile ^
     -ExecutionPolicy Bypass ^
     -Command ^
-    "& '%SCRIPT%' -DeviceID $env:ITINO_ROLLBACK_DEVICE_ID -Execute; exit $LASTEXITCODE"
+    "& '%SCRIPT%' -DeviceID $env:UNIVERSAL_DRIVER_INSTALLER_ROLLBACK_DEVICE_ID -Execute; exit $LASTEXITCODE"
 
 set "RC=%errorlevel%"
 

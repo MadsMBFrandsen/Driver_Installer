@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    Installs an ITINO lab-only fake Dell Command Update CLI.
+    Installs an Universal Driver Installer lab-only fake Dell Command Update CLI.
 
 .DESCRIPTION
     Builds a harmless dcu-cli.exe at the normal Dell Command Update path:
@@ -74,7 +74,7 @@ $OutputPath =
         'dcu-cli.exe'
 
 $StateDirectory =
-    'C:\ProgramData\Itino\FakeDCU'
+    'C:\ProgramData\UniversalDriverInstaller\FakeDCU'
 
 if (-not (Test-Path -LiteralPath $InstallDirectory)) {
     New-Item `
@@ -121,7 +121,7 @@ if (Test-Path -LiteralPath $OutputPath) {
         -not [string]::IsNullOrWhiteSpace(
             [string]$ExistingProduct
         ) -and
-        $ExistingProduct -notmatch '^ITINO Fake Dell Command Update'
+        $ExistingProduct -notmatch '^Universal Driver Installer Fake Dell Command Update'
     ) {
         throw (
             'A non-lab dcu-cli.exe already exists at ' +
@@ -142,16 +142,16 @@ using System.Text;
 
 [assembly: AssemblyVersion("99.0.0.0")]
 [assembly: AssemblyFileVersion("99.0.0.0")]
-[assembly: AssemblyProduct("ITINO Fake Dell Command Update")]
-[assembly: AssemblyCompany("ITINO Lab")]
-[assembly: AssemblyTitle("ITINO Fake dcu-cli")]
+[assembly: AssemblyProduct("Universal Driver Installer Fake Dell Command Update")]
+[assembly: AssemblyCompany("Universal Driver Installer Lab")]
+[assembly: AssemblyTitle("Universal Driver Installer Fake dcu-cli")]
 [assembly: AssemblyDescription("Lab-only Dell Command Update simulator. Does not install drivers.")]
 
-namespace ItinoFakeDCU
+namespace UniversalDriverInstallerFakeDCU
 {
     internal static class Program
     {
-        private const string ScenarioVariable = "ITINO_FAKE_DCU_SCENARIO";
+        private const string ScenarioVariable = "UNIVERSAL_DRIVER_INSTALLER_FAKE_DCU_SCENARIO";
 
         private static string ProgramData
         {
@@ -173,7 +173,7 @@ namespace ItinoFakeDCU
             {
                 return Path.Combine(
                     ProgramData,
-                    "Itino",
+                    "UniversalDriverInstaller",
                     "FakeDCU"
                 );
             }
@@ -191,7 +191,7 @@ namespace ItinoFakeDCU
 
                 WriteLog(
                     outputLog,
-                    "ITINO Fake DCU started. Scenario=" + scenario
+                    "Universal Driver Installer Fake DCU started. Scenario=" + scenario
                 );
 
                 WriteLog(
@@ -764,7 +764,7 @@ $TemporaryAssembly =
     Join-Path `
         $env:TEMP `
         (
-            'itino-fake-dcu-' +
+            'universal-driver-installer-fake-dcu-' +
             [guid]::NewGuid().ToString('N') +
             '.exe'
         )
@@ -790,12 +790,12 @@ finally {
 }
 
 [Environment]::SetEnvironmentVariable(
-    'ITINO_FAKE_DCU_SCENARIO',
+    'UNIVERSAL_DRIVER_INSTALLER_FAKE_DCU_SCENARIO',
     $Scenario,
     'Machine'
 )
 
-$env:ITINO_FAKE_DCU_SCENARIO =
+$env:UNIVERSAL_DRIVER_INSTALLER_FAKE_DCU_SCENARIO =
     $Scenario
 
 $VersionInfo =
@@ -805,7 +805,7 @@ $VersionInfo =
 
 Write-Host ''
 Write-Host '============================================================'
-Write-Host 'ITINO FAKE DELL COMMAND UPDATE INSTALLED'
+Write-Host 'Universal Driver Installer FAKE DELL COMMAND UPDATE INSTALLED'
 Write-Host '============================================================'
 Write-Host ''
 Write-Host "Path       : $OutputPath"

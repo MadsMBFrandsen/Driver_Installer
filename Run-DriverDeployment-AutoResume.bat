@@ -1,14 +1,14 @@
 @echo off
 setlocal EnableExtensions
 
-title ITINO Driver Deployment Auto Resume
+title Universal Driver Installer Auto Resume
 
 set "SCRIPT_DIR=%~dp0"
 set "PS_SCRIPT=%SCRIPT_DIR%Run-DriverDeployment-AutoResume.ps1"
 
 echo.
 echo ============================================================
-echo ITINO Driver Deployment Auto Resume
+echo Universal Driver Installer Auto Resume
 echo ============================================================
 echo.
 
@@ -48,7 +48,7 @@ set "EXITCODE=%ERRORLEVEL%"
 
 echo.
 echo ============================================================
-echo ITINO Driver Deployment Launcher Finished
+echo Universal Driver Installer Launcher Finished
 echo ============================================================
 echo.
 echo Exit Code: %EXITCODE%
@@ -62,7 +62,7 @@ if "%EXITCODE%"=="3010" (
 )
 
 if "%EXITCODE%"=="1618" (
-    echo Another ITINO driver deployment is already running.
+    echo Another Universal Driver Installer is already running.
     echo.
 )
 

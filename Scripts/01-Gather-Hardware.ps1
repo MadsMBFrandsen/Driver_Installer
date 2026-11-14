@@ -20,7 +20,7 @@
         DeviceErrors-Before.json
 
     Logging:
-        Controlled by the ITINO_WRITE_LOG_FILES environment variable.
+        Controlled by the UNIVERSAL_DRIVER_INSTALLER_WRITE_LOG_FILES environment variable.
 
         1 / true
             Write Gather-Hardware.log
@@ -46,7 +46,7 @@ $ErrorActionPreference = 'Stop'
 # BOOLEAN ENVIRONMENT OPTION
 # ============================================================
 
-function Get-ItinoBooleanOption {
+function Get-UniversalDriverInstallerBooleanOption {
 
     param(
         [Parameter(Mandatory)]
@@ -113,26 +113,26 @@ function Get-ItinoBooleanOption {
 # ============================================================
 
 $WriteLogFiles =
-    Get-ItinoBooleanOption `
-        -EnvironmentVariable 'ITINO_WRITE_LOG_FILES' `
+    Get-UniversalDriverInstallerBooleanOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_WRITE_LOG_FILES' `
         -DefaultValue $true
 
 
 $PreserveInitialDriverBaseline =
-    Get-ItinoBooleanOption `
-        -EnvironmentVariable 'ITINO_PRESERVE_INITIAL_DRIVER_BASELINE' `
+    Get-UniversalDriverInstallerBooleanOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_PRESERVE_INITIAL_DRIVER_BASELINE' `
         -DefaultValue $false
 
 
 $DeploymentCycle =
     [Environment]::GetEnvironmentVariable(
-        'ITINO_DEPLOYMENT_CYCLE'
+        'UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_CYCLE'
     )
 
 
 $DeploymentSessionId =
     [Environment]::GetEnvironmentVariable(
-        'ITINO_DEPLOYMENT_SESSION_ID'
+        'UNIVERSAL_DRIVER_INSTALLER_DEPLOYMENT_SESSION_ID'
     )
 
 
@@ -141,7 +141,7 @@ $DeploymentSessionId =
 # ============================================================
 
 $BasePath =
-    'C:\ProgramData\Itino\DriverDeployment'
+    'C:\ProgramData\UniversalDriverInstaller\DriverDeployment'
 
 
 $LogPath =
@@ -183,7 +183,7 @@ $DriverSnapshotSessionFile =
 
 
 $DriverRollbackRoot =
-    'C:\ProgramData\Itino\DriverRollback'
+    'C:\ProgramData\UniversalDriverInstaller\DriverRollback'
 
 
 $DriverRollbackBackupPath =

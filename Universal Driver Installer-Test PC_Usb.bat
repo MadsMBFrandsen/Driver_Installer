@@ -1,12 +1,12 @@
 @echo off
 setlocal
 
-title ITINO Driver Deployment - Test PC
+title Universal Driver Installer - Test PC
 
 cls
 
 echo ============================================================
-echo ITINO Driver Deployment
+echo Universal Driver Installer
 echo Test PC - Full Driver Deployment
 echo ============================================================
 echo.
@@ -257,7 +257,7 @@ REM ============================================================
 REM Read actual deployment summary
 REM ============================================================
 
-if exist "C:\ProgramData\Itino\DriverDeployment\DeploymentSummary.json" (
+if exist "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\DeploymentSummary.json" (
 
     echo Deployment result:
     echo.
@@ -266,7 +266,7 @@ if exist "C:\ProgramData\Itino\DriverDeployment\DeploymentSummary.json" (
         -NoLogo ^
         -NoProfile ^
         -Command ^
-        "$r=Get-Content 'C:\ProgramData\Itino\DriverDeployment\DeploymentSummary.json' -Raw | ConvertFrom-Json; Write-Host ('Status           : ' + $r.Status); Write-Host ('Restart Required : ' + $r.RestartRequired); if ($r.FailedStage) { Write-Host ('Failed Stage     : ' + $r.FailedStage) }; Write-Host ''; Write-Host 'Stages:'; foreach ($s in $r.Stages) { Write-Host ('  ' + $s.Name + ' | Exit=' + $s.ExitCode + ' | ' + $s.DurationSeconds + ' sec') }"
+        "$r=Get-Content 'C:\ProgramData\UniversalDriverInstaller\DriverDeployment\DeploymentSummary.json' -Raw | ConvertFrom-Json; Write-Host ('Status           : ' + $r.Status); Write-Host ('Restart Required : ' + $r.RestartRequired); if ($r.FailedStage) { Write-Host ('Failed Stage     : ' + $r.FailedStage) }; Write-Host ''; Write-Host 'Stages:'; foreach ($s in $r.Stages) { Write-Host ('  ' + $s.Name + ' | Exit=' + $s.ExitCode + ' | ' + $s.DurationSeconds + ' sec') }"
 
 ) else (
 
@@ -284,13 +284,13 @@ echo Driver Verification
 echo ============================================================
 echo.
 
-if exist "C:\ProgramData\Itino\DriverDeployment\DriverVerification.json" (
+if exist "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\DriverVerification.json" (
 
     powershell.exe ^
         -NoLogo ^
         -NoProfile ^
         -Command ^
-        "$r=Get-Content 'C:\ProgramData\Itino\DriverDeployment\DriverVerification.json' -Raw | ConvertFrom-Json; Write-Host ('Status        : ' + $r.Results.Status); Write-Host ('Errors Before : ' + $r.Results.DeviceErrorsBefore); Write-Host ('Errors After  : ' + $r.Results.DeviceErrorsAfter); Write-Host ('Fixed         : ' + $r.Results.FixedDeviceErrors); Write-Host ('Remaining     : ' + $r.Results.RemainingDeviceErrors); Write-Host ('New Errors    : ' + $r.Results.NewDeviceErrors); Write-Host ('Restart       : ' + $r.Results.RestartRequired)"
+        "$r=Get-Content 'C:\ProgramData\UniversalDriverInstaller\DriverDeployment\DriverVerification.json' -Raw | ConvertFrom-Json; Write-Host ('Status        : ' + $r.Results.Status); Write-Host ('Errors Before : ' + $r.Results.DeviceErrorsBefore); Write-Host ('Errors After  : ' + $r.Results.DeviceErrorsAfter); Write-Host ('Fixed         : ' + $r.Results.FixedDeviceErrors); Write-Host ('Remaining     : ' + $r.Results.RemainingDeviceErrors); Write-Host ('New Errors    : ' + $r.Results.NewDeviceErrors); Write-Host ('Restart       : ' + $r.Results.RestartRequired)"
 
 ) else (
 
@@ -308,12 +308,12 @@ echo Restart Status
 echo ============================================================
 echo.
 
-if exist "C:\ProgramData\Itino\DriverDeployment\RestartRequired.txt" (
+if exist "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\RestartRequired.txt" (
 
     echo [RESTART REQUIRED]
     echo.
 
-    type "C:\ProgramData\Itino\DriverDeployment\RestartRequired.txt"
+    type "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\RestartRequired.txt"
 
 ) else (
 
@@ -333,7 +333,7 @@ echo.
 
 echo All logs and reports are stored on the TEST PC:
 echo.
-echo C:\ProgramData\Itino\DriverDeployment\
+echo C:\ProgramData\UniversalDriverInstaller\DriverDeployment\
 echo.
 
 echo The USB can be removed after this test has completely finished.

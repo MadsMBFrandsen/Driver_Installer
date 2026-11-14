@@ -29,7 +29,7 @@ if "%EXITCODE%"=="0" (
 
 echo.
 echo Output location:
-echo C:\ProgramData\Itino\DriverDeployment\
+echo C:\ProgramData\UniversalDriverInstaller\DriverDeployment\
 echo.
 
 echo Press any key to close...

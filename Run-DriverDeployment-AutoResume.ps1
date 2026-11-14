@@ -16,7 +16,7 @@ param(
 
 <#
 .SYNOPSIS
-    ITINO driver deployment launcher with optional reboot resume.
+    Universal Driver Installer launcher with optional reboot resume.
 
 .DESCRIPTION
     Runs Run-DriverDeployment.ps1 and creates a temporary Scheduled Task ONLY
@@ -34,7 +34,7 @@ param(
     Exit code handling:
         0    = Final success. Resume task is removed.
         1    = Failure. Resume task is removed.
-        1618 = Another ITINO deployment is already running.
+        1618 = Another Universal Driver Installer is already running.
                Resume task is kept because the active deployment still owns it.
         3010 = Success, restart required.
                Resume task is kept.
@@ -88,7 +88,7 @@ $ResumeDelayAfterStartupSeconds =
 
 # Name of the temporary Windows Scheduled Task.
 $ResumeTaskName =
-    'ITINO Driver Deployment Resume'
+    'Universal Driver Installer Resume'
 
 
 # Main deployment controller. Expected beside this wrapper.
@@ -137,14 +137,14 @@ $CopiedLogsRoot =
 
 
 $DeploymentStateFile =
-    'C:\ProgramData\Itino\DriverDeploymentState.json'
+    'C:\ProgramData\UniversalDriverInstaller\DriverDeploymentState.json'
 
 
 $script:ControllerExecutionCompleted =
     $false
 
 
-function Get-ItinoManufacturerFolder {
+function Get-UniversalDriverInstallerManufacturerFolder {
 
     try {
 
@@ -196,10 +196,10 @@ function Get-ItinoManufacturerFolder {
 }
 
 
-function Get-ItinoUsbSessionDirectory {
+function Get-UniversalDriverInstallerUsbSessionDirectory {
 
     $ManufacturerFolder =
-        Get-ItinoManufacturerFolder
+        Get-UniversalDriverInstallerManufacturerFolder
 
 
     $ComputerDirectory =
@@ -256,7 +256,7 @@ function Get-ItinoUsbSessionDirectory {
 
 
     # On final exit 0 the controller may already have deleted
-    # C:\ProgramData\Itino. The controller copies the session
+    # C:\ProgramData\UniversalDriverInstaller. The controller copies the session
     # logs to USB before that cleanup, so use the newest session
     # folder as the final logging destination.
     if (
@@ -290,7 +290,7 @@ function Get-ItinoUsbSessionDirectory {
 # Dedicated wrapper log. This is separate from the controller
 # transcript so restart/resume behavior can be verified easily.
 $AutoResumeLogDirectory =
-    'C:\ProgramData\Itino\DriverDeployment'
+    'C:\ProgramData\UniversalDriverInstaller\DriverDeployment'
 
 
 $AutoResumeLogPath =
@@ -299,7 +299,7 @@ $AutoResumeLogPath =
         'AutoResume.log'
 
 $TempAutoResumeLogDirectory =
-    'C:\Windows\Temp\ITINO-Deployment\Driver'
+    'C:\Windows\Temp\UniversalDriverInstaller-Deployment\Driver'
 
 $TempAutoResumeLogPath =
     Join-Path `
@@ -340,7 +340,7 @@ function Write-AutoResumeLog {
         # Before/during controller execution, ProgramData is the
         # working AutoResume log. After the controller has
         # completed, do NOT recreate DriverDeployment if final
-        # cleanup already removed C:\ProgramData\Itino.
+        # cleanup already removed C:\ProgramData\UniversalDriverInstaller.
         if (
             (
                 Test-Path `
@@ -376,7 +376,7 @@ function Write-AutoResumeLog {
         if ($CopyLogsToScriptLocation) {
 
             $UsbSessionDirectory =
-                Get-ItinoUsbSessionDirectory
+                Get-UniversalDriverInstallerUsbSessionDirectory
 
 
             if (
@@ -416,7 +416,7 @@ function Write-AutoResumeLog {
 
 
         # Keep an independent live copy in Windows Temp. This copy survives
-        # the controller's production cleanup of C:\ProgramData\Itino.
+        # the controller's production cleanup of C:\ProgramData\UniversalDriverInstaller.
         if (-not (
             Test-Path `
                 -LiteralPath $TempAutoResumeLogDirectory `
@@ -470,7 +470,7 @@ function Test-IsAdministrator {
 }
 
 
-function Remove-ItinoResumeTask {
+function Remove-UniversalDriverInstallerResumeTask {
 
     try {
 
@@ -507,7 +507,7 @@ function Remove-ItinoResumeTask {
 }
 
 
-function Register-ItinoResumeTask {
+function Register-UniversalDriverInstallerResumeTask {
 
     if (-not $EnableResumeAfterRestart) {
         return
@@ -611,7 +611,7 @@ function Register-ItinoResumeTask {
 }
 
 
-function Invoke-ItinoAutomaticRestart {
+function Invoke-UniversalDriverInstallerAutomaticRestart {
 
     Write-Host ''
     Write-Host '============================================================'
@@ -639,7 +639,7 @@ function Invoke-ItinoAutomaticRestart {
         /t $RestartDelaySeconds `
         /f `
         /d p:2:4 `
-        /c "ITINO driver deployment requires a restart."
+        /c "Universal Driver Installer requires a restart."
 
 
     $ShutdownExitCode =
@@ -661,7 +661,7 @@ function Invoke-ItinoAutomaticRestart {
 
 Write-Host ''
 Write-Host '============================================================'
-Write-Host 'ITINO Driver Deployment Auto Resume'
+Write-Host 'Universal Driver Installer Auto Resume'
 Write-Host '============================================================'
 Write-Host ''
 
@@ -713,7 +713,7 @@ if (-not (
         "ERROR: Controller was not found: $ControllerPath"
     )
 
-    Remove-ItinoResumeTask
+    Remove-UniversalDriverInstallerResumeTask
 
     exit 1
 }
@@ -758,7 +758,7 @@ if ($ResumeFromTask) {
         'Started by scheduled task after restart. Removing the temporary resume task before starting the next deployment cycle.'
     )
 
-    Remove-ItinoResumeTask
+    Remove-UniversalDriverInstallerResumeTask
 }
 
 
@@ -819,10 +819,10 @@ switch ($ControllerExitCode) {
 
         # Final clean success.
         # Run-DriverDeployment.ps1 may already have removed
-        # C:\ProgramData\Itino. The Scheduled Task is separate
+        # C:\ProgramData\UniversalDriverInstaller. The Scheduled Task is separate
         # and must be removed here.
 
-        Remove-ItinoResumeTask
+        Remove-UniversalDriverInstallerResumeTask
 
         Write-Host (
             'Driver deployment completed successfully.'
@@ -858,7 +858,7 @@ switch ($ControllerExitCode) {
 
         try {
 
-            Register-ItinoResumeTask
+            Register-UniversalDriverInstallerResumeTask
         }
         catch {
 
@@ -886,7 +886,7 @@ switch ($ControllerExitCode) {
 
             try {
 
-                Invoke-ItinoAutomaticRestart
+                Invoke-UniversalDriverInstallerAutomaticRestart
             }
             catch {
 
@@ -920,7 +920,7 @@ switch ($ControllerExitCode) {
         # Do not create, remove or change the resume task here.
 
         Write-Host (
-            'Another ITINO driver deployment is already running.'
+            'Another Universal Driver Installer is already running.'
         )
 
         Write-Host (
@@ -938,7 +938,7 @@ switch ($ControllerExitCode) {
     default {
 
         # Actual failure. Do not create a reboot loop.
-        Remove-ItinoResumeTask
+        Remove-UniversalDriverInstallerResumeTask
 
         Write-Host (
             "Driver deployment failed with exit code $ControllerExitCode."

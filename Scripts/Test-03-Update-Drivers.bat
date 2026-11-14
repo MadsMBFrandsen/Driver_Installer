@@ -24,7 +24,7 @@ if not exist "%~dp003-Update-Drivers.ps1" (
 
 echo [OK] Script found.
 
-if not exist "C:\ProgramData\Itino\DriverDeployment\HardwareInformation.json" (
+if not exist "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\HardwareInformation.json" (
     echo [ERROR] HardwareInformation.json not found.
     echo Run script 01 first.
     echo.
@@ -81,13 +81,13 @@ if not "%EXITCODE%"=="0" if not "%EXITCODE%"=="3010" (
 
 echo.
 echo Restart marker:
-echo C:\ProgramData\Itino\DriverDeployment\RestartRequired.txt
+echo C:\ProgramData\UniversalDriverInstaller\DriverDeployment\RestartRequired.txt
 echo.
 
-if exist "C:\ProgramData\Itino\DriverDeployment\RestartRequired.txt" (
+if exist "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\RestartRequired.txt" (
     echo [RESTART REQUIRED]
     echo.
-    type "C:\ProgramData\Itino\DriverDeployment\RestartRequired.txt"
+    type "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\RestartRequired.txt"
 ) else (
     echo [NO RESTART MARKER]
 )
@@ -98,9 +98,9 @@ echo Last 40 log entries
 echo ============================================================
 echo.
 
-if exist "C:\ProgramData\Itino\DriverDeployment\Logs\Update-Drivers.log" (
+if exist "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\Logs\Update-Drivers.log" (
     powershell.exe -NoLogo -NoProfile -Command ^
-        "Get-Content 'C:\ProgramData\Itino\DriverDeployment\Logs\Update-Drivers.log' -Tail 40"
+        "Get-Content 'C:\ProgramData\UniversalDriverInstaller\DriverDeployment\Logs\Update-Drivers.log' -Tail 40"
 ) else (
     echo [WARNING] Update-Drivers.log was not found.
 )

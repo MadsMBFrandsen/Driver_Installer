@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    Performs prerequisite checks for the ITINO Driver Deployment workflow.
+    Performs prerequisite checks for the Universal Driver Installer workflow.
 
 .DESCRIPTION
     Stage 0 of Driver Check And Update.
@@ -17,18 +17,18 @@
         BeforeVerify
 
     Creates:
-        C:\ProgramData\Itino\DriverDeployment\Preflight.json
+        C:\ProgramData\UniversalDriverInstaller\DriverDeployment\Preflight.json
 
     Logging:
-        Controlled by ITINO_WRITE_LOG_FILES.
+        Controlled by UNIVERSAL_DRIVER_INSTALLER_WRITE_LOG_FILES.
 
     Administrator requirement:
-        Controlled by ITINO_REQUIRE_ADMINISTRATOR.
+        Controlled by UNIVERSAL_DRIVER_INSTALLER_REQUIRE_ADMINISTRATOR.
 
     Preflight requirements are controlled by Run-DriverDeployment.ps1 through:
-        ITINO_MINIMUM_SYSTEM_DRIVE_FREE_GB
-        ITINO_WEB_TIMEOUT_SECONDS
-        ITINO_MINIMUM_POWERSHELL_MAJOR_VERSION
+        UNIVERSAL_DRIVER_INSTALLER_MINIMUM_SYSTEM_DRIVE_FREE_GB
+        UNIVERSAL_DRIVER_INSTALLER_WEB_TIMEOUT_SECONDS
+        UNIVERSAL_DRIVER_INSTALLER_MINIMUM_POWERSHELL_MAJOR_VERSION
 
 .EXIT CODES
     0 = Preflight passed
@@ -56,7 +56,7 @@ $ErrorActionPreference = 'Stop'
 # ENVIRONMENT OPTION HELPERS
 # ============================================================
 
-function Get-ItinoBooleanOption {
+function Get-UniversalDriverInstallerBooleanOption {
 
     param(
         [Parameter(Mandatory)]
@@ -99,7 +99,7 @@ function Get-ItinoBooleanOption {
 }
 
 
-function Get-ItinoIntegerOption {
+function Get-UniversalDriverInstallerIntegerOption {
 
     param(
         [Parameter(Mandatory)]
@@ -155,34 +155,34 @@ function Get-ItinoIntegerOption {
 # ============================================================
 
 $WriteLogFiles =
-    Get-ItinoBooleanOption `
-        -EnvironmentVariable 'ITINO_WRITE_LOG_FILES' `
+    Get-UniversalDriverInstallerBooleanOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_WRITE_LOG_FILES' `
         -DefaultValue $true
 
 
 $RequireAdministrator =
-    Get-ItinoBooleanOption `
-        -EnvironmentVariable 'ITINO_REQUIRE_ADMINISTRATOR' `
+    Get-UniversalDriverInstallerBooleanOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_REQUIRE_ADMINISTRATOR' `
         -DefaultValue $true
 
 
 $MinimumSystemDriveFreeGB =
-    Get-ItinoIntegerOption `
-        -EnvironmentVariable 'ITINO_MINIMUM_SYSTEM_DRIVE_FREE_GB' `
+    Get-UniversalDriverInstallerIntegerOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_MINIMUM_SYSTEM_DRIVE_FREE_GB' `
         -DefaultValue 10 `
         -MinimumValue 1
 
 
 $WebTimeoutSeconds =
-    Get-ItinoIntegerOption `
-        -EnvironmentVariable 'ITINO_WEB_TIMEOUT_SECONDS' `
+    Get-UniversalDriverInstallerIntegerOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_WEB_TIMEOUT_SECONDS' `
         -DefaultValue 15 `
         -MinimumValue 1
 
 
 $MinimumPowerShellMajorVersion =
-    Get-ItinoIntegerOption `
-        -EnvironmentVariable 'ITINO_MINIMUM_POWERSHELL_MAJOR_VERSION' `
+    Get-UniversalDriverInstallerIntegerOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_MINIMUM_POWERSHELL_MAJOR_VERSION' `
         -DefaultValue 5 `
         -MinimumValue 1
 
@@ -192,7 +192,7 @@ $MinimumPowerShellMajorVersion =
 # ============================================================
 
 $BasePath =
-    'C:\ProgramData\Itino\DriverDeployment'
+    'C:\ProgramData\UniversalDriverInstaller\DriverDeployment'
 
 
 $LogsPath =
@@ -513,12 +513,12 @@ function Test-DirectoryWritable {
             Join-Path `
                 $Path `
                 (
-                    '.itino-write-test-' +
+                    '.universal-driver-installer-write-test-' +
                     [guid]::NewGuid().ToString('N') +
                     '.tmp'
                 )
 
-        'ITINO' |
+        'Universal Driver Installer' |
             Set-Content `
                 -LiteralPath $TestFile `
                 -Encoding ASCII `

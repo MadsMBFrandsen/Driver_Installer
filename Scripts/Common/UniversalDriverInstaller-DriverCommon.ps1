@@ -1,7 +1,7 @@
 ﻿#requires -version 5.1
 <#
 .SYNOPSIS
-    ITINO Driver Deployment shared helper functions.
+    Universal Driver Installer shared helper functions.
 
 .DESCRIPTION
     Phase 10.9 introduces a deliberately small shared helper file.
@@ -14,7 +14,7 @@
     structure for future consolidation.
 #>
 
-function Get-ItinoBooleanOption {
+function Get-UniversalDriverInstallerBooleanOption {
 
     param(
         [Parameter(Mandatory)]

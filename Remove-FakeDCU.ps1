@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    Removes the ITINO fake Dell Command Update lab executable.
+    Removes the Universal Driver Installer fake Dell Command Update lab executable.
 #>
 
 [CmdletBinding()]
@@ -12,7 +12,7 @@ $FakeDCU =
     'C:\Program Files\Dell\CommandUpdate\dcu-cli.exe'
 
 $StateDirectory =
-    'C:\ProgramData\Itino\FakeDCU'
+    'C:\ProgramData\UniversalDriverInstaller\FakeDCU'
 
 if (Test-Path -LiteralPath $FakeDCU) {
     $ProductName =
@@ -33,11 +33,11 @@ if (Test-Path -LiteralPath $FakeDCU) {
         [string]::IsNullOrWhiteSpace(
             [string]$ProductName
         ) -or
-        $ProductName -notmatch '^ITINO Fake Dell Command Update'
+        $ProductName -notmatch '^Universal Driver Installer Fake Dell Command Update'
     ) {
         throw (
             'The dcu-cli.exe at the normal Dell path does not identify ' +
-            'itself as the ITINO fake DCU. It will not be removed.'
+            'itself as the Universal Driver Installer fake DCU. It will not be removed.'
         )
     }
 
@@ -61,14 +61,14 @@ if (Test-Path -LiteralPath $StateDirectory) {
 }
 
 [Environment]::SetEnvironmentVariable(
-    'ITINO_FAKE_DCU_SCENARIO',
+    'UNIVERSAL_DRIVER_INSTALLER_FAKE_DCU_SCENARIO',
     $null,
     'Machine'
 )
 
 Remove-Item `
-    Env:\ITINO_FAKE_DCU_SCENARIO `
+    Env:\UNIVERSAL_DRIVER_INSTALLER_FAKE_DCU_SCENARIO `
     -ErrorAction SilentlyContinue
 
-Write-Host 'Removed ITINO_FAKE_DCU_SCENARIO machine environment variable.'
+Write-Host 'Removed UNIVERSAL_DRIVER_INSTALLER_FAKE_DCU_SCENARIO machine environment variable.'
 exit 0

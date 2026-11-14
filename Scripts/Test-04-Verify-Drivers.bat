@@ -24,7 +24,7 @@ if not exist "%~dp004-Verify-Drivers.ps1" (
 
 echo [OK] Script found.
 
-if not exist "C:\ProgramData\Itino\DriverDeployment\HardwareInformation.json" (
+if not exist "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\HardwareInformation.json" (
     echo [ERROR] HardwareInformation.json not found.
     echo Run script 01 first.
     echo.
@@ -34,7 +34,7 @@ if not exist "C:\ProgramData\Itino\DriverDeployment\HardwareInformation.json" (
 
 echo [OK] HardwareInformation.json found.
 
-if not exist "C:\ProgramData\Itino\DriverDeployment\DeviceErrors-Before.json" (
+if not exist "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\DeviceErrors-Before.json" (
     echo [WARNING] DeviceErrors-Before.json not found.
     echo Verification can still run, but before/after comparison will be limited.
 )
@@ -74,13 +74,13 @@ echo Verification report
 echo ============================================================
 echo.
 
-if exist "C:\ProgramData\Itino\DriverDeployment\DriverVerification.json" (
+if exist "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\DriverVerification.json" (
 
     powershell.exe ^
         -NoLogo ^
         -NoProfile ^
         -Command ^
-        "$r = Get-Content 'C:\ProgramData\Itino\DriverDeployment\DriverVerification.json' -Raw | ConvertFrom-Json; Write-Host ('Status        : ' + $r.Results.Status); Write-Host ('Errors Before : ' + $r.Results.DeviceErrorsBefore); Write-Host ('Errors After  : ' + $r.Results.DeviceErrorsAfter); Write-Host ('Fixed         : ' + $r.Results.FixedDeviceErrors); Write-Host ('Remaining     : ' + $r.Results.RemainingDeviceErrors); Write-Host ('New Errors    : ' + $r.Results.NewDeviceErrors); Write-Host ('Restart       : ' + $r.Results.RestartRequired)"
+        "$r = Get-Content 'C:\ProgramData\UniversalDriverInstaller\DriverDeployment\DriverVerification.json' -Raw | ConvertFrom-Json; Write-Host ('Status        : ' + $r.Results.Status); Write-Host ('Errors Before : ' + $r.Results.DeviceErrorsBefore); Write-Host ('Errors After  : ' + $r.Results.DeviceErrorsAfter); Write-Host ('Fixed         : ' + $r.Results.FixedDeviceErrors); Write-Host ('Remaining     : ' + $r.Results.RemainingDeviceErrors); Write-Host ('New Errors    : ' + $r.Results.NewDeviceErrors); Write-Host ('Restart       : ' + $r.Results.RestartRequired)"
 
 ) else (
 
@@ -93,12 +93,12 @@ echo Restart status
 echo ============================================================
 echo.
 
-if exist "C:\ProgramData\Itino\DriverDeployment\RestartRequired.txt" (
+if exist "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\RestartRequired.txt" (
 
     echo [RESTART REQUIRED]
     echo.
 
-    type "C:\ProgramData\Itino\DriverDeployment\RestartRequired.txt"
+    type "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\RestartRequired.txt"
 
 ) else (
 
@@ -111,13 +111,13 @@ echo Last 40 log entries
 echo ============================================================
 echo.
 
-if exist "C:\ProgramData\Itino\DriverDeployment\Logs\Verify-Drivers.log" (
+if exist "C:\ProgramData\UniversalDriverInstaller\DriverDeployment\Logs\Verify-Drivers.log" (
 
     powershell.exe ^
         -NoLogo ^
         -NoProfile ^
         -Command ^
-        "Get-Content 'C:\ProgramData\Itino\DriverDeployment\Logs\Verify-Drivers.log' -Tail 40"
+        "Get-Content 'C:\ProgramData\UniversalDriverInstaller\DriverDeployment\Logs\Verify-Drivers.log' -Tail 40"
 
 ) else (
 
@@ -131,23 +131,23 @@ echo ============================================================
 echo.
 
 echo Hardware:
-echo C:\ProgramData\Itino\DriverDeployment\HardwareInformation.json
+echo C:\ProgramData\UniversalDriverInstaller\DriverDeployment\HardwareInformation.json
 echo.
 
 echo Before:
-echo C:\ProgramData\Itino\DriverDeployment\DeviceErrors-Before.json
+echo C:\ProgramData\UniversalDriverInstaller\DriverDeployment\DeviceErrors-Before.json
 echo.
 
 echo After:
-echo C:\ProgramData\Itino\DriverDeployment\DeviceErrors-After.json
+echo C:\ProgramData\UniversalDriverInstaller\DriverDeployment\DeviceErrors-After.json
 echo.
 
 echo Final report:
-echo C:\ProgramData\Itino\DriverDeployment\DriverVerification.json
+echo C:\ProgramData\UniversalDriverInstaller\DriverDeployment\DriverVerification.json
 echo.
 
 echo Log:
-echo C:\ProgramData\Itino\DriverDeployment\Logs\Verify-Drivers.log
+echo C:\ProgramData\UniversalDriverInstaller\DriverDeployment\Logs\Verify-Drivers.log
 echo.
 
 echo ============================================================

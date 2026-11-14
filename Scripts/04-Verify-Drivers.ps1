@@ -3,7 +3,7 @@
     Verifies device driver state after driver installation.
 
 .DESCRIPTION
-    Stage 4 of the ITINO Driver Check And Update workflow.
+    Stage 4 of the Universal Driver Installer workflow.
 
     This script:
 
@@ -20,7 +20,7 @@
 
     Logging is controlled by Run-DriverDeployment.ps1 through:
 
-        ITINO_WRITE_LOG_FILES
+        UNIVERSAL_DRIVER_INSTALLER_WRITE_LOG_FILES
 
     Console output is always produced so the main controller can
     capture it for DriverDeployment-Error.log if another stage fails.
@@ -48,26 +48,26 @@ param()
 # PHASE 10.9 - SHARED COMMON HELPERS
 # ============================================================
 
-$ItinoCommonHelperPath =
+$UniversalDriverInstallerCommonHelperPath =
     Join-Path `
         $PSScriptRoot `
-        'Common\Itino-DriverCommon.ps1'
+        'Common\UniversalDriverInstaller-DriverCommon.ps1'
 
 
 if (-not (
     Test-Path `
-        -LiteralPath $ItinoCommonHelperPath `
+        -LiteralPath $UniversalDriverInstallerCommonHelperPath `
         -PathType Leaf
 )) {
 
     throw (
-        'Required ITINO shared helper file was not found: ' +
-        $ItinoCommonHelperPath
+        'Required Universal Driver Installer shared helper file was not found: ' +
+        $UniversalDriverInstallerCommonHelperPath
     )
 }
 
 
-. $ItinoCommonHelperPath
+. $UniversalDriverInstallerCommonHelperPath
 
 
 $ErrorActionPreference =
@@ -83,8 +83,8 @@ $ErrorActionPreference =
 # ============================================================
 
 $WriteLogFiles =
-    Get-ItinoBooleanOption `
-        -EnvironmentVariable 'ITINO_WRITE_LOG_FILES' `
+    Get-UniversalDriverInstallerBooleanOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_WRITE_LOG_FILES' `
         -DefaultValue $true
 
 
@@ -93,7 +93,7 @@ $WriteLogFiles =
 # ============================================================
 
 $BasePath =
-    'C:\ProgramData\Itino\DriverDeployment'
+    'C:\ProgramData\UniversalDriverInstaller\DriverDeployment'
 
 
 $LogPath =

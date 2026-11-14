@@ -47,29 +47,29 @@ $ErrorActionPreference =
 # PHASE 10.9 - SHARED COMMON HELPERS
 # ============================================================
 
-$ItinoCommonHelperPath =
+$UniversalDriverInstallerCommonHelperPath =
     Join-Path `
         $PSScriptRoot `
-        'Common\Itino-DriverCommon.ps1'
+        'Common\UniversalDriverInstaller-DriverCommon.ps1'
 
 
 if (-not (
     Test-Path `
-        -LiteralPath $ItinoCommonHelperPath `
+        -LiteralPath $UniversalDriverInstallerCommonHelperPath `
         -PathType Leaf
 )) {
 
     throw (
-        'Required ITINO shared helper file was not found: ' +
-        $ItinoCommonHelperPath
+        'Required Universal Driver Installer shared helper file was not found: ' +
+        $UniversalDriverInstallerCommonHelperPath
     )
 }
 
 
-. $ItinoCommonHelperPath
+. $UniversalDriverInstallerCommonHelperPath
 
 
-function Get-ItinoStringOption {
+function Get-UniversalDriverInstallerStringOption {
 
     param(
         [Parameter(Mandatory)]
@@ -98,20 +98,20 @@ function Get-ItinoStringOption {
 
 
 $WriteLogFiles =
-    Get-ItinoBooleanOption `
-        -EnvironmentVariable 'ITINO_WRITE_LOG_FILES' `
+    Get-UniversalDriverInstallerBooleanOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_WRITE_LOG_FILES' `
         -DefaultValue $true
 
 
 $UnattendedMode =
-    Get-ItinoBooleanOption `
-        -EnvironmentVariable 'ITINO_UNATTENDED_MODE' `
+    Get-UniversalDriverInstallerBooleanOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_UNATTENDED_MODE' `
         -DefaultValue $true
 
 
 $RequireAdministrator =
-    Get-ItinoBooleanOption `
-        -EnvironmentVariable 'ITINO_REQUIRE_ADMINISTRATOR' `
+    Get-UniversalDriverInstallerBooleanOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_REQUIRE_ADMINISTRATOR' `
         -DefaultValue $true
 
 
@@ -122,38 +122,38 @@ $RequireAdministrator =
 # Script 03 uses LSUClient for first-start automated Lenovo updates.
 
 $DellCommandUpdateOfficialPageUrl =
-    Get-ItinoStringOption `
-        -EnvironmentVariable 'ITINO_DELL_COMMAND_UPDATE_OFFICIAL_PAGE_URL'
+    Get-UniversalDriverInstallerStringOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_DELL_COMMAND_UPDATE_OFFICIAL_PAGE_URL'
 
 $DellCommandUpdateFallbackVersionString =
-    Get-ItinoStringOption `
-        -EnvironmentVariable 'ITINO_DELL_COMMAND_UPDATE_FALLBACK_VERSION'
+    Get-UniversalDriverInstallerStringOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_DELL_COMMAND_UPDATE_FALLBACK_VERSION'
 
 $DellCommandUpdateFallbackDownloadUrl =
-    Get-ItinoStringOption `
-        -EnvironmentVariable 'ITINO_DELL_COMMAND_UPDATE_FALLBACK_DOWNLOAD_URL'
+    Get-UniversalDriverInstallerStringOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_DELL_COMMAND_UPDATE_FALLBACK_DOWNLOAD_URL'
 
 
 $HPImageAssistantOfficialPageUrl =
-    Get-ItinoStringOption `
-        -EnvironmentVariable 'ITINO_HP_IMAGE_ASSISTANT_OFFICIAL_PAGE_URL'
+    Get-UniversalDriverInstallerStringOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_HP_IMAGE_ASSISTANT_OFFICIAL_PAGE_URL'
 
 $HPImageAssistantFallbackVersionString =
-    Get-ItinoStringOption `
-        -EnvironmentVariable 'ITINO_HP_IMAGE_ASSISTANT_FALLBACK_VERSION'
+    Get-UniversalDriverInstallerStringOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_HP_IMAGE_ASSISTANT_FALLBACK_VERSION'
 
 $HPImageAssistantFallbackDownloadUrl =
-    Get-ItinoStringOption `
-        -EnvironmentVariable 'ITINO_HP_IMAGE_ASSISTANT_FALLBACK_DOWNLOAD_URL'
+    Get-UniversalDriverInstallerStringOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_HP_IMAGE_ASSISTANT_FALLBACK_DOWNLOAD_URL'
 
 
 $LenovoSystemUpdateVersionString =
-    Get-ItinoStringOption `
-        -EnvironmentVariable 'ITINO_LENOVO_SYSTEM_UPDATE_VERSION'
+    Get-UniversalDriverInstallerStringOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_LENOVO_SYSTEM_UPDATE_VERSION'
 
 $LenovoSystemUpdateDownloadUrl =
-    Get-ItinoStringOption `
-        -EnvironmentVariable 'ITINO_LENOVO_SYSTEM_UPDATE_DOWNLOAD_URL'
+    Get-UniversalDriverInstallerStringOption `
+        -EnvironmentVariable 'UNIVERSAL_DRIVER_INSTALLER_LENOVO_SYSTEM_UPDATE_DOWNLOAD_URL'
 
 
 # OEM tool failure is allowed because script 03 can still use
@@ -182,7 +182,7 @@ $HPImageAssistantExecutableWaitSeconds =
 # ========================================================================
 
 $BasePath =
-    'C:\ProgramData\Itino\DriverDeployment'
+    'C:\ProgramData\UniversalDriverInstaller\DriverDeployment'
 
 
 $LogsPath =
@@ -2211,7 +2211,7 @@ function Install-HPImageAssistant {
     # --------------------------------------------------------
     # PHASE 10.1 - MIGRATE EXISTING TEMPORARY HPIA
     #
-    # Older deployment cycles extracted HPIA below the ITINO
+    # Older deployment cycles extracted HPIA below the Universal Driver Installer
     # working tree. If that validated copy exists and the new
     # permanent location does not, migrate the complete extracted
     # application before doing another download.
@@ -2763,7 +2763,7 @@ function Get-LatestLenovoSystemUpdateInformation {
 
         throw (
             'Lenovo System Update configuration error: controller value ' +
-            "ITINO_LENOVO_SYSTEM_UPDATE_VERSION='$ConfiguredVersionString' " +
+            "UNIVERSAL_DRIVER_INSTALLER_LENOVO_SYSTEM_UPDATE_VERSION='$ConfiguredVersionString' " +
             'could not be converted to a valid version.'
         )
     }
@@ -2777,7 +2777,7 @@ function Get-LatestLenovoSystemUpdateInformation {
 
         throw (
             'Lenovo System Update configuration error: ' +
-            'ITINO_LENOVO_SYSTEM_UPDATE_DOWNLOAD_URL is empty. ' +
+            'UNIVERSAL_DRIVER_INSTALLER_LENOVO_SYSTEM_UPDATE_DOWNLOAD_URL is empty. ' +
             'Configure it in Run-DriverDeployment.ps1.'
         )
     }
@@ -3325,7 +3325,7 @@ function Assert-OemConfigurationForManufacturer {
 
                 throw (
                     'Dell configuration error: ' +
-                    'ITINO_DELL_COMMAND_UPDATE_FALLBACK_VERSION is empty.'
+                    'UNIVERSAL_DRIVER_INSTALLER_DELL_COMMAND_UPDATE_FALLBACK_VERSION is empty.'
                 )
             }
 
@@ -3352,7 +3352,7 @@ function Assert-OemConfigurationForManufacturer {
 
                 throw (
                     'HP configuration error: ' +
-                    'ITINO_HP_IMAGE_ASSISTANT_FALLBACK_VERSION is empty.'
+                    'UNIVERSAL_DRIVER_INSTALLER_HP_IMAGE_ASSISTANT_FALLBACK_VERSION is empty.'
                 )
             }
 
@@ -3379,7 +3379,7 @@ function Assert-OemConfigurationForManufacturer {
 
                 throw (
                     'Lenovo configuration error: ' +
-                    'ITINO_LENOVO_SYSTEM_UPDATE_VERSION is empty.'
+                    'UNIVERSAL_DRIVER_INSTALLER_LENOVO_SYSTEM_UPDATE_VERSION is empty.'
                 )
             }
 

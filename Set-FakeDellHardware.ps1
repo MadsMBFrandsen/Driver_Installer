@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    Makes the ITINO driver deployment scripts treat the current PC
+    Makes the Universal Driver Installer scripts treat the current PC
     as a Dell test machine.
 
 .DESCRIPTION
@@ -8,7 +8,7 @@
 
     It only modifies:
 
-    C:\ProgramData\Itino\DriverDeployment\HardwareInformation.json
+    C:\ProgramData\UniversalDriverInstaller\DriverDeployment\HardwareInformation.json
 
     The original JSON file is backed up automatically.
 
@@ -41,7 +41,7 @@ $ErrorActionPreference = 'Stop'
 # ============================================================
 
 $BasePath =
-    'C:\ProgramData\Itino\DriverDeployment'
+    'C:\ProgramData\UniversalDriverInstaller\DriverDeployment'
 
 
 $HardwareFile =
@@ -128,7 +128,7 @@ Expected file:
 
 Write-Host ''
 Write-Host '==============================================='
-Write-Host 'ITINO FAKE DELL HARDWARE TEST MODE'
+Write-Host 'Universal Driver Installer FAKE DELL HARDWARE TEST MODE'
 Write-Host '==============================================='
 Write-Host ''
 
@@ -295,7 +295,7 @@ Write-Host 'FAKE DELL HARDWARE ENABLED'
 Write-Host '==============================================='
 Write-Host ''
 
-Write-Host 'ITINO deployment will now see:'
+Write-Host 'Universal Driver Installer will now see:'
 Write-Host ''
 
 Write-Host (
