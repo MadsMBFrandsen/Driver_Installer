@@ -82,14 +82,4 @@ C:\ProgramData\UniversalDriverInstaller
 Working data may be removed automatically after a successful deployment. On a
 failure, diagnostic information is normally preserved for troubleshooting.
 
-## Private repositories
 
-If the repository is made private later, the quick-start command will not work
-without authentication. In that case, use GitHub CLI and run `gh auth login`
-before cloning the repository.
-
-## Public repository security
-
-A public repository can be viewed and downloaded by anyone. Never commit
-access tokens, passwords, private keys, or other secrets to the project files
-or Git history.
