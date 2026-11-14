@@ -33,12 +33,14 @@ The command:
 1. Downloads and runs the repository's public `Install.ps1` bootstrap script.
 2. Downloads the latest project version from the GitHub `main` branch.
 3. Extracts the project into the current user's local application data folder.
-4. Starts `Run-DriverDeployment-AutoResume.bat` and requests administrator
-   rights through Windows UAC.
+4. Starts the auto-resume PowerShell controller directly, requests
+   administrator rights through Windows UAC, and waits for its exit result.
 5. Creates a temporary scheduled task only when the deployment must continue
    after a restart.
 6. Removes the downloaded bootstrap installation after the deployment finishes
    successfully.
+7. Removes `C:\Windows\Temp\UniversalDriverInstaller-Deployment` after final
+   success.
 
 Review [`Install.ps1`](Install.ps1) before running the command if you want to
 inspect exactly what it downloads and executes.
@@ -86,11 +88,15 @@ deployment, working data and failure reports may also be available under:
 C:\ProgramData\UniversalDriverInstaller
 ```
 
-Logs published before final cleanup remain available under:
+While a restart is pending or a deployment has failed, published diagnostics
+remain available under:
 
 ```text
 C:\Windows\Temp\UniversalDriverInstaller-Deployment\Driver
 ```
+
+The complete `UniversalDriverInstaller-Deployment` folder is removed after a
+successful deployment. It is preserved after a failure for troubleshooting.
 
 Bootstrap cleanup activity is recorded in:
 

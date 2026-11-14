@@ -32,9 +32,9 @@ if %errorlevel% neq 0 (
     echo.
 
     powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
-        -Command "Start-Process -FilePath '%ComSpec%' -ArgumentList '/c ""%~f0""' -Verb RunAs"
+        -Command "$a='-NoLogo -NoProfile -ExecutionPolicy Bypass -File '+[char]34+$env:PS_SCRIPT+[char]34; $p=Start-Process -FilePath ($env:SystemRoot+'\System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $a -Verb RunAs -Wait -PassThru; exit $p.ExitCode"
 
-    exit /b
+    exit /b %errorlevel%
 )
 
 rem ============================================================

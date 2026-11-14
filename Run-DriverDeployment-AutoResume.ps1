@@ -729,16 +729,23 @@ function Start-UniversalDriverInstallerBootstrapCleanup {
         $CleanupLogPath =
             'C:\Windows\Temp\UniversalDriverInstaller-Cleanup.log'
 
+        $DeploymentTempRoot =
+            'C:\Windows\Temp\UniversalDriverInstaller-Deployment'
+
         $EscapedInstallRoot =
             $InstallRoot.Replace("'", "''")
 
         $EscapedCleanupLogPath =
             $CleanupLogPath.Replace("'", "''")
 
+        $EscapedDeploymentTempRoot =
+            $DeploymentTempRoot.Replace("'", "''")
+
 
         $CleanupScript = @"
 `$ErrorActionPreference = 'Stop'
 `$Target = '$EscapedInstallRoot'
+`$DeploymentTempRoot = '$EscapedDeploymentTempRoot'
 `$LogPath = '$EscapedCleanupLogPath'
 for (`$Attempt = 1; `$Attempt -le 12; `$Attempt++) {
     Start-Sleep -Seconds 5
@@ -746,7 +753,10 @@ for (`$Attempt = 1; `$Attempt -le 12; `$Attempt++) {
         if (Test-Path -LiteralPath `$Target) {
             Remove-Item -LiteralPath `$Target -Recurse -Force -ErrorAction Stop
         }
-        Add-Content -LiteralPath `$LogPath -Value "`$(Get-Date -Format o) Bootstrap installation removed: `$Target"
+        if (Test-Path -LiteralPath `$DeploymentTempRoot) {
+            Remove-Item -LiteralPath `$DeploymentTempRoot -Recurse -Force -ErrorAction Stop
+        }
+        Add-Content -LiteralPath `$LogPath -Value "`$(Get-Date -Format o) Success cleanup completed. Bootstrap='`$Target'; DeploymentTemp='`$DeploymentTempRoot'"
         exit 0
     }
     catch {
@@ -781,11 +791,14 @@ exit 1
 
 
         Write-Host (
-            "Bootstrap cleanup scheduled for: $InstallRoot"
+            'Success cleanup scheduled for the bootstrap installation and ' +
+            'deployment Temp folder.'
         )
 
         Write-AutoResumeLog -Message (
-            "Bootstrap cleanup scheduled for: $InstallRoot"
+            'Success cleanup scheduled. ' +
+            "Bootstrap='$InstallRoot'; " +
+            "DeploymentTemp='$DeploymentTempRoot'"
         )
 
         return $true
@@ -793,13 +806,13 @@ exit 1
     catch {
 
         Write-Host (
-            'WARNING: Unable to schedule bootstrap cleanup. ' +
+            'WARNING: Unable to schedule success cleanup. ' +
             "Reason: $($_.Exception.Message)"
         )
 
         Write-AutoResumeLog `
             -Message (
-                'Unable to schedule bootstrap cleanup. ' +
+                'Unable to schedule success cleanup. ' +
                 "Reason: $($_.Exception.Message)"
             ) `
             -Level WARNING

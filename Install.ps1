@@ -22,10 +22,10 @@ $ApplicationRoot =
         $InstallRoot `
         'Driver_Installer-main'
 
-$LauncherPath =
+$AutoResumePath =
     Join-Path `
         $ApplicationRoot `
-        'Run-DriverDeployment-AutoResume.bat'
+        'Run-DriverDeployment-AutoResume.ps1'
 
 $CleanupMarkerPath =
     Join-Path `
@@ -56,10 +56,10 @@ try {
 
     if (-not (
         Test-Path `
-            -LiteralPath $LauncherPath `
+            -LiteralPath $AutoResumePath `
             -PathType Leaf
     )) {
-        throw "The launcher was not found after extraction: $LauncherPath"
+        throw "The auto-resume script was not found after extraction: $AutoResumePath"
     }
 
     # The auto-resume wrapper only removes installations carrying this marker.
@@ -70,9 +70,50 @@ try {
         -Encoding UTF8 `
         -Force
 
-    Write-Host 'Starting Universal Driver Installer...'
+    $WindowsPowerShellPath =
+        Join-Path `
+            $env:SystemRoot `
+            'System32\WindowsPowerShell\v1.0\powershell.exe'
 
-    & $LauncherPath
+    $PowerShellArguments =
+        (
+            '-NoLogo -NoProfile -ExecutionPolicy Bypass -File "' +
+            $AutoResumePath +
+            '"'
+        )
+
+    Write-Host 'Requesting administrator rights...'
+
+    $DeploymentProcess =
+        Start-Process `
+            -FilePath $WindowsPowerShellPath `
+            -ArgumentList $PowerShellArguments `
+            -Verb RunAs `
+            -Wait `
+            -PassThru `
+            -ErrorAction Stop
+
+    $DeploymentExitCode =
+        [int]$DeploymentProcess.ExitCode
+
+    switch ($DeploymentExitCode) {
+
+        0 {
+            Write-Host 'Universal Driver Installer completed successfully.'
+        }
+
+        3010 {
+            Write-Host 'Universal Driver Installer scheduled a restart.'
+        }
+
+        1618 {
+            throw 'Another Universal Driver Installer deployment is already running.'
+        }
+
+        default {
+            throw "Universal Driver Installer failed with exit code $DeploymentExitCode."
+        }
+    }
 }
 finally {
 
