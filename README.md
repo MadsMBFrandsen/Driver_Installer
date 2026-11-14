@@ -25,17 +25,21 @@ Open **Command Prompt (CMD)**, paste the complete command below, and press
 Enter:
 
 ```cmd
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$base=Join-Path $env:LOCALAPPDATA 'UniversalDriverInstaller'; $zip=Join-Path $env:TEMP 'UniversalDriverInstaller-main.zip'; New-Item -ItemType Directory -Path $base -Force | Out-Null; Invoke-WebRequest 'https://github.com/MadsMBFrandsen/Driver_Installer/archive/refs/heads/main.zip' -UseBasicParsing -OutFile $zip; Expand-Archive -LiteralPath $zip -DestinationPath $base -Force; & (Join-Path $base 'Driver_Installer-main\Run-DriverDeployment-AutoResume.bat')"
+powershell -c "irm https://raw.githubusercontent.com/MadsMBFrandsen/Driver_Installer/main/Install.ps1|iex"
 ```
 
 The command:
 
-1. Downloads the latest version from the GitHub `main` branch.
-2. Extracts the project into the current user's local application data folder.
-3. Starts `Run-DriverDeployment-AutoResume.bat`.
-4. Requests administrator rights through Windows UAC.
+1. Downloads and runs the repository's public `Install.ps1` bootstrap script.
+2. Downloads the latest project version from the GitHub `main` branch.
+3. Extracts the project into the current user's local application data folder.
+4. Starts `Run-DriverDeployment-AutoResume.bat` and requests administrator
+   rights through Windows UAC.
 5. Creates a temporary scheduled task only when the deployment must continue
    after a restart.
+
+Review [`Install.ps1`](Install.ps1) before running the command if you want to
+inspect exactly what it downloads and executes.
 
 The project is installed in:
 
